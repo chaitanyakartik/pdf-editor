@@ -175,7 +175,8 @@ def analyze(page: pymupdf.Page, rect) -> dict:
         out["pitch"] = float(np.median(np.diff([l["baseline"] for l in lines]))) / Z
 
     words = _ocr(inner, bg, single_line=len(lines) == 1)
-    out["text"] = "\n".join(" ".join(w) for w in words)
+    # drop bullet/border fragments OCR picks up at a box edge ("| End Date", "• Start")
+    out["text"] = "\n".join(" ".join(w).lstrip("|•·¦ ").rstrip("| ") for w in words)
 
     first = lines[0]
     xh = first["baseline"] - first["xtop"]

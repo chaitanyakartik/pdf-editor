@@ -15,6 +15,7 @@
   --r:10px; --sans:'Space Grotesk',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;height:100%;background:var(--ink);color:var(--text);font-family:var(--sans)}
 button,select,input,textarea{font:inherit;color:inherit}
 
@@ -67,6 +68,16 @@ body.mode-edit .ov.hint .sp-box{outline:1px solid rgba(255,77,61,.35)}
 body.mode-patch .sp-box{pointer-events:none}
 body.mode-patch .ov{cursor:crosshair}
 .sel{position:absolute;border:1.5px solid var(--blue);background:var(--blue-soft);pointer-events:none}
+.sel.ref,.refmark{position:absolute;border:1.5px dashed var(--mint);background:rgba(61,220,151,.12);pointer-events:none}
+.refmark span{position:absolute;left:-1.5px;top:-17px;background:var(--mint);color:#06281a;font:600 10px/1 var(--mono);padding:3px 5px;border-radius:4px 4px 0 0}
+.refline{position:absolute;width:0;border-left:1.5px dashed var(--mint);pointer-events:none;opacity:.7}
+.refbar{display:none;align-items:center;gap:6px}
+body.mode-patch .refbar{display:inline-flex}
+.btn.ref{border-color:rgba(61,220,151,.5)} .btn.ref.on{background:var(--mint);color:#06281a;border-color:var(--mint)}
+body.picking .ov{cursor:copy}
+.refchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;background:rgba(61,220,151,.14);color:var(--mint);padding:4px 4px 4px 8px;border-radius:7px}
+.refchip button{border:0;background:none;color:var(--mint);cursor:pointer;padding:0 4px}
+.pop .refrow{color:var(--mint)} .pop .refrow input{accent-color:var(--mint)}
 .page.busy::after{content:"";position:absolute;inset:0;background:rgba(22,22,29,.06);animation:pulse 0.8s infinite alternate}
 @keyframes pulse{to{background:rgba(22,22,29,.14)}}
 
@@ -95,7 +106,10 @@ body.mode-patch .ov{cursor:crosshair}
 #toast.show{opacity:1;transform:translateX(-50%)}
 #toast.warn{border-left-color:var(--amber)} #toast.err{border-left-color:var(--red)}
 kbd{font-family:var(--mono);font-size:11px;background:var(--ink-3);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
-@media (max-width:820px){.file,.hide-sm{display:none}}
+.btn,.seg button,label.chk,.refchip{white-space:nowrap}
+header{flex-wrap:nowrap;overflow-x:auto}
+@media (max-width:1440px){.file{display:none}}
+@media (max-width:1200px){.hide-sm{display:none}}
 </style>
 </head>
 <body class="mode-edit">
@@ -108,6 +122,10 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--ink-3);border:1px so
   <div class="seg" id="modeSeg">
     <button data-mode="edit" class="on" title="Click any text to change it (E)">Edit text</button>
     <button data-mode="patch" title="Drag a box: cover + type, for scans/images (P)">Patch</button>
+  </div>
+  <div class="refbar" id="refbar">
+    <button class="btn ref" id="refBtn" title="Drag over existing text to copy its left edge, font, size, colour and line spacing (or Shift-drag)">◧ Set reference</button>
+    <span class="refchip" id="refChip" hidden><b>REF</b> <span id="refTxt"></span> <button id="refClr" title="Clear reference">✕</button></span>
   </div>
   <label class="chk hide-sm" title="Shrink the new text if it's longer than the original"><input type="checkbox" id="fit"> Fit width</label>
   <label class="chk hide-sm" title="Outline every editable text run"><input type="checkbox" id="hint"> Show text</label>
@@ -124,7 +142,7 @@ kbd{font-family:var(--mono);font-size:11px;background:var(--ink-3);border:1px so
     <p>Drop a PDF here or <button class="btn primary" id="openBtn2">choose a file</button></p>
     <ol>
       <li><b>Edit text</b>: click any text, type, <kbd>Enter</kbd>. Same spot, size, colour and font. Stamps, logos, headers and backgrounds don't move.</li>
-      <li><b>Patch</b>: for scanned pages or text baked into an image. Drag a box, it's filled with the paper colour, then type over it.</li>
+      <li><b>Patch</b>: for scanned pages or text baked into an image. Drag a box, it's filled with the paper colour, then type over it. <b>Set reference</b> first (or Shift-drag) over a line whose left edge and style the new text should copy.</li>
       <li><b>Download</b> when done. <kbd>⌘Z</kbd> undoes.</li>
     </ol>
   </div>
@@ -171,7 +189,7 @@ function updCount(){ $('#count').hidden = !st.edits; $('#count').textContent = s
 /* ---------- pages */
 const io = new IntersectionObserver(es => es.forEach(e => { if(e.isIntersecting) loadPage(+e.target.dataset.p); }), {rootMargin:'600px'});
 function buildPages(){
-  const main = $('#pages'); main.innerHTML=''; st.pages=[];
+  const main = $('#pages'); main.innerHTML=''; st.pages=[]; clearRef();
   st.meta.pages.forEach((pg,i)=>{
     const el = document.createElement('div'); el.className='page'; el.dataset.p=i;
     el.innerHTML = `<span class="num">${i+1}</span><img alt=""><div class="ov"></div>`;
@@ -259,8 +277,9 @@ function bindOverlay(i){
   ov.addEventListener('pointerdown', e => {
     if(st.mode!=='patch' || e.button!==0) return;
     closePop();
-    const r = ov.getBoundingClientRect(), sel = document.createElement('div'); sel.className='sel'; ov.appendChild(sel);
-    drag = {i, ov, r, sel, x0:e.clientX-r.left, y0:e.clientY-r.top};
+    const isRef = st.pickRef || e.shiftKey;
+    const r = ov.getBoundingClientRect(), sel = document.createElement('div'); sel.className='sel'+(isRef?' ref':''); ov.appendChild(sel);
+    drag = {i, ov, r, sel, isRef, x0:e.clientX-r.left, y0:e.clientY-r.top};
     ov.setPointerCapture(e.pointerId);
   });
   ov.addEventListener('pointermove', e => {
@@ -274,8 +293,39 @@ function bindOverlay(i){
     const d=drag; drag=null;
     if(d.x1===undefined || Math.abs(d.x1-d.x0)<4 || Math.abs(d.y1-d.y0)<4){ d.sel.remove(); return; }
     const k=st.scale, rect=[Math.min(d.x0,d.x1)/k, Math.min(d.y0,d.y1)/k, Math.max(d.x0,d.x1)/k, Math.max(d.y0,d.y1)/k];
-    openPop(d.i, rect, d.sel);
+    if(d.isRef) setRef(d.i, rect, d.sel); else openPop(d.i, rect, d.sel);
   });
+}
+
+/* reference: a box over existing text whose left edge + style new text should copy */
+function pickRef(on){ st.pickRef=on; $('#refBtn').classList.toggle('on',on); document.body.classList.toggle('picking',on);
+  if(on){ closePop(); toast('Drag a box over the text to copy: its left edge, font, size and colour.'); } }
+$('#refBtn').onclick = () => pickRef(!st.pickRef);
+$('#refClr').onclick = clearRef;
+function clearRef(){ st.ref=null; document.querySelectorAll('.refmark,.refline').forEach(n=>n.remove()); $('#refChip').hidden=true; $('#refBtn').hidden=false; }
+async function setRef(i, rect, sel){
+  pickRef(false);
+  try{
+    const a = await post('/api/analyze', {page:i, rect});
+    sel.remove();
+    if(!a.size || !a.lines.length){ toast('No text found in that box. Draw the reference over existing text.','warn'); return; }
+    clearRef();
+    st.ref = {page:i, rect, a, left: Math.min(...a.lines.map(l=>l.x))};
+    drawRef();
+    $('#refTxt').textContent = `${FONTS[a.font]} ${a.size}pt`;
+    $('#refChip').hidden=false; $('#refBtn').hidden=true;
+    toast('Reference set. Now drag where the new text goes.');
+  }catch(e){ sel.remove(); toast('Could not read reference: '+e.message,'err'); }
+}
+function drawRef(){
+  document.querySelectorAll('.refmark,.refline').forEach(n=>n.remove());
+  if(!st.ref) return;
+  const k=st.scale, {page, rect, left}=st.ref, P=st.pages[page]; if(!P) return;
+  const m=document.createElement('div'); m.className='refmark'; m.innerHTML='<span>REF</span>';
+  Object.assign(m.style,{left:rect[0]*k+'px',top:rect[1]*k+'px',width:(rect[2]-rect[0])*k+'px',height:(rect[3]-rect[1])*k+'px'});
+  const g=document.createElement('div'); g.className='refline';   // the left edge new text will align to
+  Object.assign(g.style,{left:left*k+'px',top:0,height:'100%'});
+  P.el.querySelector('.ov').append(m,g);
 }
 const hex = c => '#'+c.map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');
 const unhex = h => [1,3,5].map(o=>parseInt(h.slice(o,o+2),16)/255);
@@ -286,6 +336,7 @@ function openPop(i, rect, sel){
   const el = document.createElement('div'); el.className='pop';
   el.innerHTML = `<h4>PATCH <span class="det">reading the text under the box…</span></h4>
     <textarea placeholder="New text (leave empty to just erase)" disabled></textarea>
+    ${st.ref?`<label class="row refrow"><input type="checkbox" class="useref" checked> Match reference (left edge, font, size, colour, spacing)</label>`:''}
     <div class="row">Cover <input type="checkbox" class="cov" checked> <input type="color" class="fillc" value="#ffffff"> <span style="flex:1"></span>Text <input type="color" class="txtc" value="#111111"></div>
     <div class="row">Size <input type="number" class="sz" value="11" min="4" max="96" step="0.1">
       <select class="ff">${Object.entries(FONTS).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
@@ -294,24 +345,39 @@ function openPop(i, rect, sel){
   Object.assign(el.style,{left:left+'px', top:rect[1]*k+'px'});
   P.el.appendChild(el); pop={el, sel};
   const ta=el.querySelector('textarea'), det=el.querySelector('.det');
-  let place = {};  // baseline/x/pitch/hscale from analysis: new text lands where the old text was
+  let place = {}, tgt = null;  // baseline/x/pitch/hscale: where the new text's ink goes
   el.addEventListener('pointerdown', e=>e.stopPropagation());
   el.querySelector('[data-x]').onclick = closePop;
+  const set = (cls, v) => { el.querySelector(cls).value = v; };
+  // style + left edge from the reference (if on) else from the box itself; baseline from the box's own
+  // text if it has any, else snapped onto the reference's line grid
+  function decide(){
+    const a = tgt, R = st.ref && el.querySelector('.useref')?.checked ? st.ref : null;
+    if(!a) return;
+    set('.fillc', hex(a.fill));
+    const S = R ? R.a : (a.size ? a : null);
+    if(!S){
+      set('.sz', Math.max(6, Math.min(48, Math.round((rect[3]-rect[1])*0.72)))); place = {};
+      det.textContent = 'empty area'; return;
+    }
+    set('.sz', S.size); set('.ff', S.font); set('.txtc', hex(S.color));
+    const size = S.size, pitch = S.pitch || a.pitch || null;
+    let baseline, x;
+    if(a.lines.length) baseline = a.lines[0].baseline;
+    else {
+      const guess = (rect[1]+rect[3])/2 + 0.35*size;   // centre the line's x-height in the box
+      const g = R && R.page===i ? R.a.pitch : 0, b0 = R && R.a.lines[0].baseline;
+      baseline = g && Math.abs(guess-b0) < 40*g ? b0 + Math.round((guess-b0)/g)*g : guess;
+    }
+    x = R ? R.left : (a.lines.length ? Math.min(...a.lines.map(l=>l.x)) : rect[0]+1);
+    place = {x, baseline, pitch, hscale:S.hscale||1};
+    det.textContent = (R ? 'REF · ' : '') + `${FONTS[S.font]} ${S.size}pt` + (S.hscale&&S.hscale!==1?` · width ${Math.round(S.hscale*100)}%`:'') +
+      (R ? ` · left ${x.toFixed(1)}` : (S.match!=null?` · ${Math.round(S.match*100)}% shape match`:''));
+  }
+  el.querySelector('.useref')?.addEventListener('change', decide);
   post('/api/analyze', {page:i, rect}).then(a => {
     if(!pop || pop.el!==el) return;
-    el.querySelector('.fillc').value = hex(a.fill);
-    el.querySelector('.txtc').value = hex(a.color);
-    if(a.size){
-      el.querySelector('.sz').value = a.size;
-      el.querySelector('.ff').value = a.font;
-      const l0 = a.lines[0];
-      place = {x:l0.x, baseline:l0.baseline, pitch:a.pitch, hscale:a.hscale};
-      det.textContent = `${FONTS[a.font]} ${a.size}pt` + (a.hscale!==1?` · width ${Math.round(a.hscale*100)}%`:'') +
-        (a.match!=null?` · ${Math.round(a.match*100)}% shape match`:'');
-    } else {
-      el.querySelector('.sz').value = Math.max(6, Math.min(48, Math.round((rect[3]-rect[1])*0.72)));
-      det.textContent = 'empty area';
-    }
+    tgt = a; decide();
     ta.value = a.text || '';
     if(a.size && !a.text) det.textContent += a.ocr ? ' · couldn\'t read the words' : ' · install tesseract to read words';
   }).catch(e => { det.textContent = 'could not read: '+e.message; })
@@ -332,7 +398,7 @@ function closePop(){ if(pop){ pop.el.remove(); pop.sel.remove(); pop=null; } }
 
 /* ---------- toolbar */
 function setMode(m){
-  st.mode=m; cancelEdit(); closePop();
+  st.mode=m; cancelEdit(); closePop(); if(st.pickRef) pickRef(false);
   document.body.className='mode-'+m;
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
 }
@@ -341,7 +407,7 @@ $('#hint').onchange = e => document.querySelectorAll('.ov').forEach(o=>o.classLi
 function zoom(f){
   if(!st.meta) return;
   st.scale = Math.min(4, Math.max(0.5, +(st.scale*f).toFixed(2))); $('#zLbl').textContent=Math.round(st.scale*100);
-  cancelEdit(); closePop(); st.pages.forEach((P,i)=>{ sizePage(i); if(P.loaded>=0){ drawSpans(i); loadPage(i,true);} });
+  cancelEdit(); closePop(); st.pages.forEach((P,i)=>{ sizePage(i); if(P.loaded>=0){ drawSpans(i); loadPage(i,true);} }); drawRef();
 }
 $('#zIn').onclick=()=>zoom(1.2); $('#zOut').onclick=()=>zoom(1/1.2);
 async function undo(){ cancelEdit(); closePop(); setMeta(await post('/api/undo',{})); st.edits=Math.max(0,st.edits-1); updCount(); reloadAll(); }
@@ -352,7 +418,8 @@ document.addEventListener('keydown', e => {
   if(e.target.closest('input,textarea')) return;
   if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
   else if(e.key==='e') setMode('edit'); else if(e.key==='p') setMode('patch');
-  else if(e.key==='Escape'){ cancelEdit(); closePop(); }
+  else if(e.key==='Escape'){ cancelEdit(); closePop(); if(st.pickRef) pickRef(false); }
+  else if(e.key==='r' && st.mode==='patch') pickRef(!st.pickRef);
 });
 
 /* resume an already-open doc (server restarts keep nothing; page reloads keep the doc) */

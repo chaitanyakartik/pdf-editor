@@ -19,6 +19,10 @@ backgrounds and every other line on the page stay where they were.
   baseline, left edge, text colour and paper colour, so the new text lands exactly on the old one. If no
   standard font fits (a narrow typeface), it picks Sans or Sans Bold by stroke thickness, matches glyph height,
   and squeezes the width (PDF horizontal scaling). Untick *Cover* to just add text.
+- **Reference box** (Patch mode: *Set reference*, `R`, or Shift-drag): drag over existing text first. Every patch after
+  that copies its **left edge** (ink-to-ink, corrected for the first letter's side bearing), font, size, colour and line
+  spacing. If the target box is empty and the reference has 2+ lines, the new line snaps onto the reference's line grid.
+  The reference stays (green REF box + dashed left-edge guide) until you clear it. `tests/ui_ref.py` covers both cases.
   Checked on a scanned certificate (`tests/scan_check.py`, `tests/ui_patch_scan.py`): title, date, 4-line address and
   a bullet line re-patch near-identically (Sans, 58–64% overlap); a narrow-typeface footer gets the right width and
   height, but the letter shapes differ.

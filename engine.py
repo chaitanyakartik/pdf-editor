@@ -215,7 +215,7 @@ def edit_span(doc: pymupdf.Document, pno: int, span_id: int, new_text: str, fit:
 def patch(doc: pymupdf.Document, pno: int, rect, fill, text: str, size: float, color, fontname="helv",
           x=None, baseline=None, pitch=None, fit=False, hscale=1.0) -> None:
     """For scans / image text: paint a box (fill=None for transparent) and write text in it.
-    With x/baseline (from scan.analyze) the text sits exactly where the old text was."""
+    With x/baseline (from scan.analyze: x = left edge of the ink) the text sits exactly where the old text was."""
     page = doc[pno]
     r = pymupdf.Rect(rect)
     if fill is not None:
@@ -234,7 +234,10 @@ def patch(doc: pymupdf.Document, pno: int, rect, fill, text: str, size: float, c
     pitch = pitch or size * 1.2
     tw = pymupdf.TextWriter(page.rect)
     for k, line in enumerate(lines):
-        tw.append((x, baseline + k * pitch), line, font=font, fontsize=size)
+        # x is where INK starts (measured off the scan); shift back by the first letter's left bearing
+        first = line.lstrip()[:1]
+        lsb = font.glyph_bbox(ord(first)).x0 * size * hscale if first and font.has_glyph(ord(first)) else 0
+        tw.append((x - lsb, baseline + k * pitch), line, font=font, fontsize=size)
     # horizontal scaling around the text's start point (narrow/wide typefaces on scans)
     morph = (pymupdf.Point(x, baseline), pymupdf.Matrix(hscale, 1)) if abs(hscale - 1) > 1e-3 else None
     tw.write_text(page, color=color, morph=morph)
