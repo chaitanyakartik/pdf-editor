@@ -212,24 +212,29 @@ def edit_span(doc: pymupdf.Document, pno: int, span_id: int, new_text: str, fit:
             "collateral": [m for m in missing if m.strip()][:5]}
 
 
-def patch(doc: pymupdf.Document, pno: int, rect, fill, text: str, size: float, color, fontname="helv") -> None:
-    """For scans / image text: paint a box (fill=None for transparent) and write text in it."""
+def patch(doc: pymupdf.Document, pno: int, rect, fill, text: str, size: float, color, fontname="helv",
+          x=None, baseline=None, pitch=None, fit=False, hscale=1.0) -> None:
+    """For scans / image text: paint a box (fill=None for transparent) and write text in it.
+    With x/baseline (from scan.analyze) the text sits exactly where the old text was."""
     page = doc[pno]
     r = pymupdf.Rect(rect)
     if fill is not None:
         page.draw_rect(r, color=None, fill=fill, overlay=True, width=0)
-    if text.strip():
-        font = pymupdf.Font(fontname)
-        tw = pymupdf.TextWriter(page.rect)
-        # baseline: vertically centre a single line, top-align multi-line
-        lines = text.split("\n")
-        asc = font.ascender * size
-        if len(lines) == 1:
-            w = font.text_length(text, fontsize=size)
-            if w > r.width - 2:  # shrink to fit the box
-                size *= (r.width - 2) / w
-            y = r.y0 + (r.height - size) / 2 + asc * 0.95
-            tw.append((r.x0 + 1, y), text, font=font, fontsize=size)
-        else:
-            tw.fill_textbox(r, text, font=font, fontsize=size)
-        tw.write_text(page, color=color)
+    if not text.strip():
+        return
+    font = pymupdf.Font(fontname)
+    lines = text.split("\n")
+    if baseline is None:  # nothing detected: centre the first line in the box
+        x, baseline = r.x0 + 1, r.y0 + (r.height - size) / 2 + font.ascender * size * 0.95
+        fit = True
+    widest = max(font.text_length(l, fontsize=size) for l in lines) * hscale
+    room = r.x1 - x - 1
+    if fit and widest > room > 0:
+        size *= room / widest
+    pitch = pitch or size * 1.2
+    tw = pymupdf.TextWriter(page.rect)
+    for k, line in enumerate(lines):
+        tw.append((x, baseline + k * pitch), line, font=font, fontsize=size)
+    # horizontal scaling around the text's start point (narrow/wide typefaces on scans)
+    morph = (pymupdf.Point(x, baseline), pymupdf.Matrix(hscale, 1)) if abs(hscale - 1) > 1e-3 else None
+    tw.write_text(page, color=color, morph=morph)

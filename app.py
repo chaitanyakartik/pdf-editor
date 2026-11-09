@@ -9,6 +9,7 @@ import pymupdf
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
 import engine
+import scan
 
 PORT = int(os.environ.get("PORT", 43063))
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -98,12 +99,21 @@ def edit():
     return jsonify({**res, **_meta()})
 
 
+@app.post("/api/analyze")
+def analyze():
+    """What's under a Patch box: existing text (OCR), font, size, colours, baseline."""
+    j = request.get_json()
+    return jsonify(scan.analyze(_doc()[j["page"]], j["rect"]))
+
+
 @app.post("/api/patch")
 def patch():
     j = request.get_json()
     _snapshot()
     engine.patch(_doc(), j["page"], j["rect"], j.get("fill"), j.get("text", ""),
-                 float(j.get("size", 11)), j.get("color", [0, 0, 0]), j.get("font", "helv"))
+                 float(j.get("size", 11)), j.get("color", [0, 0, 0]), j.get("font", "helv"),
+                 x=j.get("x"), baseline=j.get("baseline"), pitch=j.get("pitch"),
+                 fit=j.get("fit", False), hscale=float(j.get("hscale", 1.0)))
     _bump()
     return jsonify(_meta())
 

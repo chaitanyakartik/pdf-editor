@@ -13,8 +13,15 @@ backgrounds and every other line on the page stay where they were.
   embedded font (if it has every glyph you typed and its metrics check out) → same-named installed font →
   look-alike standard font (toast warns) → any installed font covering the script (Kannada, Devanagari…).
   **Fit width** shrinks new text that's longer than the original.
-- **Patch**: for scans or text baked into an image. Drag a box. It's filled with the most common colour on its
-  border (the paper) and you type over it. Untick *Cover* to just add text.
+- **Patch**: for scans or text baked into an image. Drag a box over the words. `scan.py` then:
+  reads the existing words (Tesseract) and **prefills them** so you just edit; picks the font by rendering those
+  words in 8 standard fonts and keeping the best pixel overlap; sets the size from the line's ink width; detects
+  baseline, left edge, text colour and paper colour, so the new text lands exactly on the old one. If no
+  standard font fits (a narrow typeface), it picks Sans or Sans Bold by stroke thickness, matches glyph height,
+  and squeezes the width (PDF horizontal scaling). Untick *Cover* to just add text.
+  Checked on a scanned certificate (`tests/scan_check.py`, `tests/ui_patch_scan.py`): title, date, 4-line address and
+  a bullet line re-patch near-identically (Sans, 58–64% overlap); a narrow-typeface footer gets the right width and
+  height, but the letter shapes differ.
 - ⌘Z / ⌘⇧Z undo/redo (50 steps). `E` / `P` switch modes.
 
 ## How it works (engine.py)
@@ -32,5 +39,7 @@ origin with `TextWriter`. After each edit it re-extracts the page and reports an
 
 ## Limits
 - Rotated/vertical text: not click-editable (use Patch).
-- Scanned pages have no text layer, so Patch is the only option there.
+- Scanned pages have no text layer, so Patch is the only option there. Patch fonts are the standard 14
+  (Sans/Serif/Mono families), so a distinctive scanned typeface gets the right size and position, but the letter shapes won't match.
+- Patch needs `tesseract` on PATH to prefill words (`brew install tesseract`); without it, size, font weight and colours are still detected.
 - One text run = one style. A run that mixes bold and regular is split by the PDF into separate runs; edit each.
