@@ -28,6 +28,18 @@ backgrounds and every other line on the page stay where they were.
   height, but the letter shapes differ.
 - ⌘Z / ⌘⇧Z undo/redo (50 steps). `E` / `P` switch modes.
 
+## Patch panel (formatting + live preview)
+Dragging a Patch box opens a panel on the right: text, font family (Sans/Serif/Mono + every .ttf/.otf installed
+on the Mac), Bold/Italic, size, colour, width %, letter spacing, line spacing, align, exact Left/Baseline (pt), cover
+colour, shrink-to-fit. Every change re-renders a **preview** over the page: a flat cover box plus the new text as a
+transparent PNG drawn by the same `compose.draw` code as Apply (checked pixel-identical). Drag the previewed text or use
+arrow keys (0.25pt, Shift = 2pt) to position it; it snaps to the reference's left edge and line grid. ⌘↵ applies.
+
+## Move (`M`)
+Box some text → it's lifted (ink as a transparent PNG, its old spot shown cleared) → drag it or use arrow keys,
+snapping to the reference → Enter. On scans (an image under the box) the scanned pixels move, so it looks identical;
+on real-text PDFs the text spans themselves move (same font, still selectable).
+
 ## How it works (engine.py)
 Removes only the touched glyphs with a PyMuPDF redaction whose rect is a thin band inside the span
 (`images=NONE, graphics=NONE`), so images and vector art are untouched, then writes the new string at the same
@@ -38,6 +50,8 @@ origin with `TextWriter`. After each edit it re-extracts the page and reports an
   2026-11-09 over 21 real PDFs: 0 collateral text, 0 stray pixels on 20/21. The one exception: MuPDF rewrites the
   content stream on redaction (absolute `Tm` → relative `TD`, e.g. `99.99996`), shifting one unrelated line by ~0.1pt.
   That's sub-pixel and not visible.
+- `tests/ui_inspector.py <outdir> [url]`: reference + patch panel (formatting, preview, drag-snap) + Move, on a throwaway
+  server (`PORT=43070 python app.py <scan>`), never on the live one.
 - `tests/ui_e2e.py <outdir>`: drives the UI in headless Chromium (edit, patch, undo) with the server running on `tests/fixture.pdf`.
 - `tests/make_fixture.py`: builds the fixture (header bar, highlight box, image, stamp, mixed bold/regular, rotated text).
 

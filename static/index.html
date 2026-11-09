@@ -37,6 +37,7 @@ header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px
 .seg button.on{background:var(--ink-3);color:var(--text)}
 .seg button.on[data-mode=edit]{box-shadow:inset 0 -2px 0 var(--red)}
 .seg button.on[data-mode=patch]{box-shadow:inset 0 -2px 0 var(--blue)}
+.seg button.on[data-mode=move]{box-shadow:inset 0 -2px 0 var(--amber)}
 label.chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer}
 label.chk input{accent-color:var(--red)}
 .zoom{font-family:var(--mono);font-size:12px;color:var(--muted);width:4ch;text-align:center}
@@ -65,14 +66,15 @@ body.mode-edit .sp-box:hover{outline:1.5px solid var(--red);background:var(--red
 body.mode-edit .sp-box.ro{cursor:not-allowed}
 body.mode-edit .sp-box.ro:hover{outline:1.5px dashed var(--muted);background:transparent}
 body.mode-edit .ov.hint .sp-box{outline:1px solid rgba(255,77,61,.35)}
-body.mode-patch .sp-box{pointer-events:none}
-body.mode-patch .ov{cursor:crosshair}
+body.mode-patch .sp-box,body.mode-move .sp-box{pointer-events:none}
+body.mode-patch .ov,body.mode-move .ov{cursor:crosshair}
+.sel.mv{border-color:var(--amber);background:rgba(255,184,77,.14)}
 .sel{position:absolute;border:1.5px solid var(--blue);background:var(--blue-soft);pointer-events:none}
 .sel.ref,.refmark{position:absolute;border:1.5px dashed var(--mint);background:rgba(61,220,151,.12);pointer-events:none}
 .refmark span{position:absolute;left:-1.5px;top:-17px;background:var(--mint);color:#06281a;font:600 10px/1 var(--mono);padding:3px 5px;border-radius:4px 4px 0 0}
 .refline{position:absolute;width:0;border-left:1.5px dashed var(--mint);pointer-events:none;opacity:.7}
 .refbar{display:none;align-items:center;gap:6px}
-body.mode-patch .refbar{display:inline-flex}
+body.mode-patch .refbar,body.mode-move .refbar{display:inline-flex}
 .btn.ref{border-color:rgba(61,220,151,.5)} .btn.ref.on{background:var(--mint);color:#06281a;border-color:var(--mint)}
 body.picking .ov{cursor:copy}
 .refchip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;background:rgba(61,220,151,.14);color:var(--mint);padding:4px 4px 4px 8px;border-radius:7px}
@@ -88,18 +90,43 @@ body.picking .ov{cursor:copy}
   background:var(--ink-2);color:var(--muted);border:1px solid var(--line);padding:4px 8px;border-radius:6px;white-space:nowrap}
 .ed-tip b{color:var(--text);font-weight:600}
 
-/* patch popover */
-.pop{position:absolute;z-index:8;width:300px;background:var(--ink-2);border:1px solid var(--line);border-radius:12px;padding:12px;
-  box-shadow:0 20px 40px -10px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:10px;color:var(--text)}
-.pop h4{margin:0;font-size:13px;letter-spacing:.02em;color:var(--blue);display:flex;gap:8px;align-items:baseline}
-.pop .det{font-family:var(--mono);font-size:10.5px;font-weight:400;color:var(--muted);letter-spacing:0}
-.pop textarea{width:100%;min-height:54px;resize:vertical;background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px}
-.pop .row{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
-.pop input[type=number]{width:62px;background:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
-.pop select{background:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px}
-.pop input[type=color]{width:28px;height:24px;border:1px solid var(--line);border-radius:6px;padding:0;background:none}
-.sw{width:22px;height:22px;border-radius:6px;border:1px solid var(--line)}
-
+/* patch inspector (docked right) */
+.insp{position:fixed;z-index:30;top:58px;right:0;bottom:0;width:330px;background:var(--ink-2);border-left:1px solid var(--line);
+  display:flex;flex-direction:column;gap:12px;padding:14px 16px 16px;overflow-y:auto;box-shadow:-20px 0 40px -20px rgba(0,0,0,.6)}
+body.insp-open main{padding-right:350px}
+.insp .ih{display:flex;align-items:baseline;gap:8px}
+.insp .ih b{font-size:13px;letter-spacing:.06em;color:var(--blue)}
+.insp .det{flex:1;font-family:var(--mono);font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.insp .ih button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:14px}
+.insp textarea{width:100%;min-height:64px;resize:vertical;background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;line-height:1.4}
+.insp .gl{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.insp .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.insp .f{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--muted)}
+.insp input[type=number],.insp select{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:7px;padding:6px 8px;font-size:13px}
+.insp input[type=number]{font-family:var(--mono);font-size:12.5px}
+.insp input[type=color]{width:100%;height:32px;border:1px solid var(--line);border-radius:7px;padding:2px;background:var(--ink)}
+.insp .row{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted)}
+.insp .tog{display:inline-flex;gap:4px}
+.insp .tog button,.insp .al button{width:34px;height:32px;border:1px solid var(--line);background:var(--ink);border-radius:7px;cursor:pointer;color:var(--muted)}
+.insp .tog button.on,.insp .al button.on{background:var(--blue-soft);border-color:var(--blue);color:var(--text)}
+.insp .tog button:disabled{opacity:.3;cursor:default}
+.insp .al{display:flex;gap:4px}
+.insp .refrow{color:var(--mint);font-size:12px;display:flex;gap:8px;align-items:center} .insp .refrow input{accent-color:var(--mint)}
+.insp .hint{font-size:11px;color:var(--muted);line-height:1.4}
+.insp .act{display:flex;gap:8px;margin-top:auto;padding-top:8px} .insp .act .btn{flex:1;justify-content:center}
+.insp .err{color:var(--red);font-size:12px}
+.pv-cover{position:absolute;pointer-events:none}
+.pv-text{position:absolute;cursor:move;outline:1px dashed rgba(106,168,255,.8);outline-offset:1px}
+.pv-text.dragging{outline-color:var(--blue)}
+.guide{position:absolute;pointer-events:none;border:0 dashed var(--mint);z-index:4}
+.guide.v{width:0;top:0;bottom:0;border-left-width:1.5px} .guide.h{height:0;left:0;right:0;border-top-width:1.5px}
+/* move */
+.mv-hole{position:absolute;pointer-events:none}
+.mv-lift{position:absolute;cursor:grab;outline:1.5px dashed var(--amber);outline-offset:2px;z-index:3}
+.mv-lift.dragging{cursor:grabbing}
+.mv-bar{position:absolute;z-index:6;display:flex;gap:6px;align-items:center;background:var(--ink-2);border:1px solid var(--line);
+  border-radius:9px;padding:5px 6px 5px 10px;font:11.5px var(--mono);color:var(--muted);white-space:nowrap;box-shadow:0 10px 24px -8px rgba(0,0,0,.6)}
+.mv-bar .btn{padding:4px 10px;font-size:12px}
 /* toast */
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);opacity:0;transition:.2s;z-index:50;
   background:var(--ink-2);border:1px solid var(--line);border-left:4px solid var(--mint);padding:10px 14px;border-radius:10px;font-size:13px;max-width:min(560px,90vw)}
@@ -122,6 +149,7 @@ header{flex-wrap:nowrap;overflow-x:auto}
   <div class="seg" id="modeSeg">
     <button data-mode="edit" class="on" title="Click any text to change it (E)">Edit text</button>
     <button data-mode="patch" title="Drag a box: cover + type, for scans/images (P)">Patch</button>
+    <button data-mode="move" title="Drag a box around text, then drag it where it should go (M)">Move</button>
   </div>
   <div class="refbar" id="refbar">
     <button class="btn ref" id="refBtn" title="Drag over existing text to copy its left edge, font, size, colour and line spacing (or Shift-drag)">◧ Set reference</button>
@@ -142,12 +170,39 @@ header{flex-wrap:nowrap;overflow-x:auto}
     <p>Drop a PDF here or <button class="btn primary" id="openBtn2">choose a file</button></p>
     <ol>
       <li><b>Edit text</b>: click any text, type, <kbd>Enter</kbd>. Same spot, size, colour and font. Stamps, logos, headers and backgrounds don't move.</li>
-      <li><b>Patch</b>: for scanned pages or text baked into an image. Drag a box, it's filled with the paper colour, then type over it. <b>Set reference</b> first (or Shift-drag) over a line whose left edge and style the new text should copy.</li>
+      <li><b>Patch</b>: for scanned pages or text baked into an image. Drag a box, edit the text and formatting with a live preview, then Apply. <b>Set reference</b> first (or Shift-drag) over a line whose left edge and style the new text should copy.</li>
+      <li><b>Move</b>: drag a box around text, then drag it (or use the arrow keys) where it should go. Snaps to the reference.</li>
       <li><b>Download</b> when done. <kbd>⌘Z</kbd> undoes.</li>
     </ol>
   </div>
 </div>
 <main id="pages"></main>
+<aside class="insp" id="insp" hidden>
+  <div class="ih"><b>PATCH</b><span class="det" id="pDet"></span><button id="pClose" title="Cancel (Esc)">✕</button></div>
+  <textarea id="pText" placeholder="New text (leave empty to just erase)" spellcheck="false"></textarea>
+  <label class="refrow" id="pRefRow"><input type="checkbox" id="pUseRef" checked> Match reference (left edge, font, size, colour, spacing)</label>
+  <div><div class="gl">Font</div>
+    <div class="row"><select id="pFam"></select>
+      <span class="tog"><button id="pB" title="Bold"><b>B</b></button><button id="pI" title="Italic"><i>I</i></button></span></div></div>
+  <div class="grid">
+    <label class="f">Size (pt)<input type="number" id="pSize" step="0.1" min="2" max="200"></label>
+    <label class="f">Colour<input type="color" id="pColor"></label>
+    <label class="f">Width %<input type="number" id="pWidth" step="1" min="50" max="200" value="100"></label>
+    <label class="f">Letter spacing (pt)<input type="number" id="pSpacing" step="0.05" value="0"></label>
+    <label class="f">Line spacing (pt)<input type="number" id="pPitch" step="0.1" min="1"></label>
+    <div class="f">Align<div class="al" id="pAlign"><button data-a="left" class="on" title="Left: starts at the Left position">⇤</button><button data-a="center" title="Centre in the box">↔</button><button data-a="right" title="Right edge of the box">⇥</button></div></div>
+  </div>
+  <div><div class="gl">Position (pt)</div>
+    <div class="grid">
+      <label class="f">Left edge<input type="number" id="pX" step="0.1"></label>
+      <label class="f">Baseline<input type="number" id="pY" step="0.1"></label>
+    </div>
+    <div class="hint">Drag the text on the page, or arrow keys (⇧ = 2pt). It snaps to the reference's left edge and lines.</div></div>
+  <div><div class="gl">Cover the old text</div>
+    <div class="row"><input type="checkbox" id="pCover" checked><input type="color" id="pFill" style="width:60px"> <label class="row" style="margin-left:auto"><input type="checkbox" id="pFit"> Shrink to fit box</label></div></div>
+  <div class="err" id="pErr" hidden></div>
+  <div class="act"><button class="btn" id="pCancel">Cancel</button><button class="btn primary" id="pApply">Apply <kbd>⌘↵</kbd></button></div>
+</aside>
 <div id="toast"></div>
 
 <script>
@@ -270,15 +325,18 @@ async function commitEdit(){
   finally{ E.inp.remove(); E.tip.remove(); P.el.classList.remove('busy'); }
 }
 
-/* ---------- patch mode */
+/* ---------- patch + move: drawing boxes */
 let drag=null;
+const place = (el, r) => { const k=st.scale; Object.assign(el.style,{left:r[0]*k+'px',top:r[1]*k+'px',width:(r[2]-r[0])*k+'px',height:(r[3]-r[1])*k+'px'}); return el; };
+const div = (cls) => { const d=document.createElement('div'); d.className=cls; return d; };
 function bindOverlay(i){
   const ov = st.pages[i].el.querySelector('.ov');
   ov.addEventListener('pointerdown', e => {
-    if(st.mode!=='patch' || e.button!==0) return;
-    closePop();
+    if(!(st.mode==='patch' || st.mode==='move') || e.button!==0) return;
+    if(e.target.closest('.pv-text,.mv-lift,.mv-bar')) return;          // those drag themselves
     const isRef = st.pickRef || e.shiftKey;
-    const r = ov.getBoundingClientRect(), sel = document.createElement('div'); sel.className='sel'+(isRef?' ref':''); ov.appendChild(sel);
+    if(!isRef){ closePatch(); cancelMove(); }
+    const r = ov.getBoundingClientRect(), sel = div('sel'+(isRef?' ref':(st.mode==='move'?' mv':''))); ov.appendChild(sel);
     drag = {i, ov, r, sel, isRef, x0:e.clientX-r.left, y0:e.clientY-r.top};
     ov.setPointerCapture(e.pointerId);
   });
@@ -293,19 +351,30 @@ function bindOverlay(i){
     const d=drag; drag=null;
     if(d.x1===undefined || Math.abs(d.x1-d.x0)<4 || Math.abs(d.y1-d.y0)<4){ d.sel.remove(); return; }
     const k=st.scale, rect=[Math.min(d.x0,d.x1)/k, Math.min(d.y0,d.y1)/k, Math.max(d.x0,d.x1)/k, Math.max(d.y0,d.y1)/k];
-    if(d.isRef) setRef(d.i, rect, d.sel); else openPop(d.i, rect, d.sel);
+    if(d.isRef) setRef(d.i, rect, d.sel);
+    else if(st.mode==='patch') openPatch(d.i, rect, d.sel);
+    else startMove(d.i, rect, d.sel);
   });
 }
 
-/* reference: a box over existing text whose left edge + style new text should copy */
+/* ---------- fonts */
+let FAMS=[], FONTID={};   // FONTID[id] = {fi: family index, k: 'r'|'b'|'i'|'bi'}
+api('/api/fonts').then(list => {
+  FAMS=list; list.forEach((f,fi)=>Object.entries(f.styles).forEach(([k,id])=>FONTID[id]={fi,k}));
+  const opt = (f,fi) => `<option value="${fi}">${f.name}</option>`;
+  $('#pFam').innerHTML = `<optgroup label="Standard">${list.map((f,fi)=>f.std?opt(f,fi):'').join('')}</optgroup>
+    <optgroup label="Installed on this Mac">${list.map((f,fi)=>f.std?'':opt(f,fi)).join('')}</optgroup>`;
+}).catch(()=>{});
+function fontLabel(id){ const f=FONTID[id]; return f ? FAMS[f.fi].name + {r:'',b:' Bold',i:' Italic',bi:' Bold Italic'}[f.k] : id; }
+
+/* ---------- reference: a box over existing text whose left edge + style new text copies */
 function pickRef(on){ st.pickRef=on; $('#refBtn').classList.toggle('on',on); document.body.classList.toggle('picking',on);
-  if(on){ closePop(); toast('Drag a box over the text to copy: its left edge, font, size and colour.'); } }
+  if(on) toast('Drag a box over the text to copy: its left edge, font, size, colour and line spacing.'); }
 $('#refBtn').onclick = () => pickRef(!st.pickRef);
-$('#refClr').onclick = clearRef;
+$('#refClr').onclick = () => { clearRef(); if(st.P){ $('#pRefRow').hidden=true; decide(); preview(); } };
 function clearRef(){ st.ref=null; document.querySelectorAll('.refmark,.refline').forEach(n=>n.remove()); $('#refChip').hidden=true; $('#refBtn').hidden=false; }
 async function setRef(i, rect, sel){
-  pickRef(false);
-  toast('Reading reference…');
+  pickRef(false); toast('Reading reference…');
   try{
     const a = await post('/api/analyze', {page:i, rect});
     sel.remove();
@@ -313,93 +382,228 @@ async function setRef(i, rect, sel){
     clearRef();
     st.ref = {page:i, rect, a, left: Math.min(...a.lines.map(l=>l.x))};
     drawRef();
-    $('#refTxt').textContent = `${FONTS[a.font]} ${a.size}pt`;
+    $('#refTxt').textContent = `${fontLabel(a.font)} ${a.size}pt`;
     $('#refChip').hidden=false; $('#refBtn').hidden=true;
-    toast('Reference set. Now drag where the new text goes.');
+    if(st.P){ $('#pRefRow').hidden=false; $('#pUseRef').checked=true; decide(); preview(); }
+    toast(st.mode==='move' ? 'Reference set. Now box the text to move.' : 'Reference set. Now drag where the new text goes.');
   }catch(e){ sel.remove(); toast('Could not read reference: '+e.message,'err'); }
 }
 function drawRef(){
   document.querySelectorAll('.refmark,.refline').forEach(n=>n.remove());
   if(!st.ref) return;
   const k=st.scale, {page, rect, left}=st.ref, P=st.pages[page]; if(!P) return;
-  const m=document.createElement('div'); m.className='refmark'; m.innerHTML='<span>REF</span>';
-  Object.assign(m.style,{left:rect[0]*k+'px',top:rect[1]*k+'px',width:(rect[2]-rect[0])*k+'px',height:(rect[3]-rect[1])*k+'px'});
-  const g=document.createElement('div'); g.className='refline';   // the left edge new text will align to
-  Object.assign(g.style,{left:left*k+'px',top:0,height:'100%'});
+  const m=place(div('refmark'), rect); m.innerHTML='<span>REF</span>';
+  const g=div('refline'); Object.assign(g.style,{left:left*k+'px',top:0,height:'100%'});   // the left edge to align to
   P.el.querySelector('.ov').append(m,g);
+}
+/* snap an ink-left x / baseline y (pt) to the reference's left edge and its line grid */
+function snap(i, x, y){
+  const R=st.ref; if(!R || R.page!==i) return {x,y};
+  const tol=7/st.scale; let sx=null, sy=null;
+  if(x!=null && Math.abs(x-R.left)<tol){ x=R.left; sx=x; }
+  if(y!=null){
+    const bl=R.a.lines.map(l=>l.baseline), c=[...bl];
+    if(R.a.pitch) c.push(bl[0]+Math.round((y-bl[0])/R.a.pitch)*R.a.pitch);
+    for(const b of c) if(Math.abs(y-b)<tol){ y=b; sy=b; break; }
+  }
+  return {x,y,sx,sy};
+}
+function guides(i, sx, sy){
+  document.querySelectorAll('.guide').forEach(n=>n.remove());
+  if(i==null) return;
+  const ov=st.pages[i].el.querySelector('.ov'), k=st.scale;
+  if(sx!=null){ const g=div('guide v'); g.style.left=sx*k+'px'; ov.appendChild(g); }
+  if(sy!=null){ const g=div('guide h'); g.style.top=sy*k+'px'; ov.appendChild(g); }
 }
 const hex = c => '#'+c.map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');
 const unhex = h => [1,3,5].map(o=>parseInt(h.slice(o,o+2),16)/255);
-const FONTS = {helv:'Sans',hebo:'Sans Bold',heit:'Sans Italic',tiro:'Serif',tibo:'Serif Bold',tiit:'Serif Italic',cour:'Mono',cobo:'Mono Bold'};
-let pop=null;
-function openPop(i, rect, sel){
-  const k=st.scale, P=st.pages[i];
-  const el = document.createElement('div'); el.className='pop';
-  el.innerHTML = `<h4>PATCH <span class="det">reading the text under the box…</span></h4>
-    <textarea placeholder="New text (leave empty to just erase)" disabled></textarea>
-    ${st.ref?`<label class="row refrow"><input type="checkbox" class="useref" checked> Match reference (left edge, font, size, colour, spacing)</label>`:''}
-    <div class="row">Cover <input type="checkbox" class="cov" checked> <input type="color" class="fillc" value="#ffffff"> <span style="flex:1"></span>Text <input type="color" class="txtc" value="#111111"></div>
-    <div class="row">Size <input type="number" class="sz" value="11" min="4" max="96" step="0.1">
-      <select class="ff">${Object.entries(FONTS).map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>
-    <div class="row"><span style="flex:1"><kbd>⌘↵</kbd> apply</span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Apply</button></div>`;
-  let left = rect[2]*k+12; if(left+300 > P.el.clientWidth) left = Math.max(0, rect[0]*k-302);
-  Object.assign(el.style,{left:left+'px', top:rect[1]*k+'px'});
-  P.el.appendChild(el); pop={el, sel};
-  const ta=el.querySelector('textarea'), det=el.querySelector('.det');
-  let place = {}, tgt = null;  // baseline/x/pitch/hscale: where the new text's ink goes
-  el.addEventListener('pointerdown', e=>e.stopPropagation());
-  el.querySelector('[data-x]').onclick = closePop;
-  const set = (cls, v) => { el.querySelector(cls).value = v; };
-  // style + left edge from the reference (if on) else from the box itself; baseline from the box's own
-  // text if it has any, else snapped onto the reference's line grid
-  function decide(){
-    const a = tgt, R = st.ref && el.querySelector('.useref')?.checked ? st.ref : null;
-    if(!a) return;
-    set('.fillc', hex(a.fill));
-    const S = R ? R.a : (a.size ? a : null);
-    if(!S){
-      set('.sz', Math.max(6, Math.min(48, Math.round((rect[3]-rect[1])*0.72)))); place = {};
-      det.textContent = 'empty area'; return;
-    }
-    set('.sz', S.size); set('.ff', S.font); set('.txtc', hex(S.color));
-    const size = S.size, pitch = S.pitch || a.pitch || null;
-    let baseline, x;
-    if(a.lines.length) baseline = a.lines[0].baseline;
-    else {
-      const guess = (rect[1]+rect[3])/2 + 0.35*size;   // centre the line's x-height in the box
-      const g = R && R.page===i ? R.a.pitch : 0, b0 = R && R.a.lines[0].baseline;
-      baseline = g && Math.abs(guess-b0) < 40*g ? b0 + Math.round((guess-b0)/g)*g : guess;
-    }
-    x = R ? R.left : (a.lines.length ? Math.min(...a.lines.map(l=>l.x)) : rect[0]+1);
-    place = {x, baseline, pitch, hscale:S.hscale||1};
-    det.textContent = (R ? 'REF · ' : '') + `${FONTS[S.font]} ${S.size}pt` + (S.hscale&&S.hscale!==1?` · width ${Math.round(S.hscale*100)}%`:'') +
-      (R ? ` · left ${x.toFixed(1)}` : (S.match!=null?` · ${Math.round(S.match*100)}% shape match`:''));
-  }
-  el.querySelector('.useref')?.addEventListener('change', decide);
+const rgb = c => `rgb(${c.map(v=>Math.round(v*255)).join(',')})`;
+const num = id => { const v=parseFloat($(id).value); return isNaN(v)?null:v; };
+
+/* ---------- patch: inspector + live preview */
+function openPatch(i, rect, sel){
+  closePatch();
+  const ov = st.pages[i].el.querySelector('.ov');
+  const P = st.P = {i, rect, sel, tgt:null, align:'left', bold:false, italic:false, seq:0};
+  P.cover = place(div('pv-cover'), rect); P.cover.style.background='#fff'; ov.appendChild(P.cover);
+  P.pv = document.createElement('img'); P.pv.className='pv-text'; P.pv.hidden=true; P.pv.draggable=false; ov.appendChild(P.pv);
+  bindTextDrag(P.pv);
+  $('#insp').hidden=false; document.body.classList.add('insp-open');
+  $('#pRefRow').hidden = !st.ref; $('#pUseRef').checked = true; $('#pErr').hidden = true;
+  $('#pText').value=''; $('#pText').disabled=true; $('#pDet').textContent='reading the text under the box…';
+  $('#pSize').value = Math.max(6, Math.min(48, Math.round((rect[3]-rect[1])*0.72))); $('#pColor').value='#111111';
+  $('#pWidth').value=100; $('#pSpacing').value=0; $('#pPitch').value=''; $('#pFit').checked=false; $('#pCover').checked=true; $('#pFill').value='#ffffff';
+  setAlign('left'); setFontUI('helv');
+  $('#pX').value=(rect[0]+1).toFixed(2); $('#pY').value=((rect[1]+rect[3])/2+0.35*num('#pSize')).toFixed(2);
   post('/api/analyze', {page:i, rect}).then(a => {
-    if(!pop || pop.el!==el) return;
-    tgt = a; decide();
-    ta.value = a.text || '';
-    if(a.size && !a.text) det.textContent += a.ocr ? ' · couldn\'t read the words' : ' · install tesseract to read words';
-  }).catch(e => { det.textContent = 'could not read: '+e.message; })
-    .finally(() => { ta.disabled=false; ta.focus(); ta.select(); });
-  const apply = async () => {
-    const body = {page:i, rect, text:ta.value, size:+el.querySelector('.sz').value, font:el.querySelector('.ff').value,
-      color:unhex(el.querySelector('.txtc').value), fill: el.querySelector('.cov').checked ? unhex(el.querySelector('.fillc').value) : null,
-      fit:$('#fit').checked, ...place};
-    closePop(); P.el.classList.add('busy');
-    try{ setMeta(await post('/api/patch', body)); st.edits++; updCount(); await loadPage(i,true); toast('Patched.'); }
-    catch(e){ toast('Patch failed: '+e.message,'err'); }
-    finally{ P.el.classList.remove('busy'); }
-  };
-  el.querySelector('[data-ok]').onclick = apply;
-  el.addEventListener('keydown', e => { if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)) apply(); if(e.key==='Escape') closePop(); e.stopPropagation(); });
+    if(st.P!==P) return;
+    P.tgt=a; decide();
+    $('#pText').value = a.text || '';
+    if(a.size && !a.text) $('#pDet').textContent += a.ocr ? ' · couldn\'t read the words' : ' · install tesseract to read words';
+  }).catch(e => { $('#pDet').textContent='could not read: '+e.message; })
+    .finally(() => { if(st.P!==P) return; $('#pText').disabled=false; $('#pText').focus(); $('#pText').select(); preview(); });
 }
-function closePop(){ if(pop){ pop.el.remove(); pop.sel.remove(); pop=null; } }
+// style + left edge from the reference (if on) else from the box's own text; baseline from the box's
+// own text if it has any, else snapped onto the reference's line grid
+function decide(){
+  const P=st.P, a=P && P.tgt; if(!a) return;
+  const R = st.ref && $('#pUseRef').checked ? st.ref : null, rect=P.rect;
+  $('#pFill').value = hex(a.fill);
+  const S = R ? R.a : (a.size ? a : null);
+  if(!S){ $('#pDet').textContent='empty area'; return; }
+  $('#pSize').value=S.size; setFontUI(S.font); $('#pColor').value=hex(S.color);
+  $('#pWidth').value=Math.round((S.hscale||1)*100);
+  const pitch = S.pitch || a.pitch || null; $('#pPitch').value = pitch ? pitch.toFixed(2) : '';
+  let y;
+  if(a.lines.length) y = a.lines[0].baseline;
+  else {
+    const guess=(rect[1]+rect[3])/2 + 0.35*S.size, g = R && R.page===P.i ? R.a.pitch : 0, b0 = R && R.a.lines[0].baseline;
+    y = g && Math.abs(guess-b0) < 40*g ? b0 + Math.round((guess-b0)/g)*g : guess;
+  }
+  const x = R ? R.left : (a.lines.length ? Math.min(...a.lines.map(l=>l.x)) : rect[0]+1);
+  $('#pX').value=x.toFixed(2); $('#pY').value=y.toFixed(2); setAlign('left');
+  $('#pDet').textContent = (R?'REF · ':'') + `${fontLabel(S.font)} ${S.size}pt` + (R ? '' : (S.match!=null?` · ${Math.round(S.match*100)}% shape match`:''));
+}
+function setFontUI(id){
+  const f=FONTID[id] || FONTID.helv || {fi:0,k:'r'};
+  $('#pFam').value=f.fi; st.P && (st.P.bold=f.k.includes('b'), st.P.italic=f.k.includes('i')); updTog();
+}
+function updTog(){
+  const P=st.P; if(!P || !FAMS.length) return;
+  const s=FAMS[+$('#pFam').value].styles;
+  $('#pB').disabled = !(s.b||s.bi); $('#pI').disabled = !(s.i||s.bi);
+  if($('#pB').disabled) P.bold=false; if($('#pI').disabled) P.italic=false;
+  $('#pB').classList.toggle('on',P.bold); $('#pI').classList.toggle('on',P.italic);
+}
+function curFont(){
+  const P=st.P, s=FAMS.length ? FAMS[+$('#pFam').value].styles : {r:'helv'};
+  const k=(P.bold?'b':'')+(P.italic?'i':'') || 'r';
+  return s[k] || s.r || s.b || Object.values(s)[0];
+}
+function setAlign(a){ if(st.P) st.P.align=a; document.querySelectorAll('#pAlign button').forEach(b=>b.classList.toggle('on',b.dataset.a===a)); }
+function spec(){
+  const P=st.P;
+  return {page:P.i, rect:P.rect, text:$('#pText').value, font:curFont(), size:num('#pSize')||11, color:unhex($('#pColor').value),
+    hscale:(num('#pWidth')||100)/100, spacing:num('#pSpacing')||0, pitch:num('#pPitch'), align:P.align,
+    x:num('#pX'), baseline:num('#pY'), fit:$('#pFit').checked, fill:$('#pCover').checked ? unhex($('#pFill').value) : null};
+}
+let pvT;
+function preview(){ clearTimeout(pvT); pvT=setTimeout(doPreview, 80); }
+async function doPreview(){
+  const P=st.P; if(!P) return;
+  const sp=spec(), seq=++P.seq;
+  P.cover.hidden = !sp.fill; if(sp.fill) P.cover.style.background=rgb(sp.fill);
+  try{
+    const r = await post('/api/preview', {...sp, zoom:Math.min(6, st.scale*(window.devicePixelRatio||1))});
+    if(st.P!==P || seq!==P.seq) return;
+    $('#pErr').hidden=true;
+    if(!r.png){ P.pv.hidden=true; return; }
+    P.pv.src=r.png; place(P.pv, r.clip); P.pv.hidden=false; P.clip=r.clip;
+  }catch(e){ if(st.P===P && seq===P.seq){ $('#pErr').textContent=e.message; $('#pErr').hidden=false; } }
+}
+function bindTextDrag(img){
+  img.addEventListener('pointerdown', e => {
+    const P=st.P; if(!P || e.button!==0) return;
+    e.stopPropagation(); e.preventDefault(); img.setPointerCapture(e.pointerId); img.classList.add('dragging');
+    const s0={cx:e.clientX, cy:e.clientY, X:num('#pX'), Y:num('#pY')}; let res={x:s0.X,y:s0.Y};
+    const mv = ev => {
+      const k=st.scale; res = snap(P.i, s0.X+(ev.clientX-s0.cx)/k, s0.Y+(ev.clientY-s0.cy)/k);
+      img.style.transform=`translate(${(res.x-s0.X)*k}px,${(res.y-s0.Y)*k}px)`; guides(P.i, res.sx, res.sy);
+    };
+    const up = () => {
+      img.removeEventListener('pointermove', mv); img.removeEventListener('pointerup', up); img.classList.remove('dragging');
+      if(Math.abs(res.x-s0.X)>0.05) setAlign('left');
+      $('#pX').value=res.x.toFixed(2); $('#pY').value=res.y.toFixed(2);
+      setTimeout(()=>{ img.style.transform=''; guides(null); }, 120); preview();
+    };
+    img.addEventListener('pointermove', mv); img.addEventListener('pointerup', up);
+  });
+}
+async function applyPatch(){
+  const P=st.P; if(!P) return;
+  const sp=spec(), pg=P.i;
+  $('#pApply').disabled=true;
+  try{
+    setMeta(await post('/api/patch', sp)); st.edits++; updCount();
+    closePatch(); await loadPage(pg,true); toast('Patched.');
+  }catch(e){ $('#pErr').textContent='Not applied: '+e.message; $('#pErr').hidden=false; }
+  finally{ $('#pApply').disabled=false; }
+}
+function closePatch(){
+  const P=st.P; if(!P) return;
+  P.sel.remove(); P.cover.remove(); P.pv.remove(); guides(null);
+  st.P=null; $('#insp').hidden=true; document.body.classList.remove('insp-open');
+}
+// every control re-renders the preview
+['#pText','#pSize','#pColor','#pWidth','#pSpacing','#pPitch','#pX','#pY','#pFill'].forEach(id=>$(id).addEventListener('input', preview));
+['#pCover','#pFit'].forEach(id=>$(id).addEventListener('change', preview));
+$('#pFam').addEventListener('change', ()=>{ updTog(); preview(); });
+$('#pB').onclick = () => { st.P.bold=!st.P.bold; updTog(); preview(); };
+$('#pI').onclick = () => { st.P.italic=!st.P.italic; updTog(); preview(); };
+document.querySelectorAll('#pAlign button').forEach(b=>b.onclick=()=>{ setAlign(b.dataset.a); preview(); });
+$('#pUseRef').addEventListener('change', ()=>{ decide(); preview(); });
+$('#pApply').onclick = applyPatch; $('#pCancel').onclick = $('#pClose').onclick = closePatch;
+$('#insp').addEventListener('keydown', e => {
+  if(e.key==='Enter' && (e.metaKey||e.ctrlKey)){ e.preventDefault(); applyPatch(); }
+  else if(e.key==='Escape') closePatch();
+  e.stopPropagation();
+});
+
+/* ---------- move: lift the ink in a box, drag it, drop it */
+async function startMove(i, rect, sel){
+  cancelMove();
+  try{
+    const L = await post('/api/lift', {page:i, rect});
+    sel.remove();
+    const ov=st.pages[i].el.querySelector('.ov');
+    const M = st.mv = {i, rect, L, dx:0, dy:0};
+    M.hole = place(div('mv-hole'), L.ink); M.hole.style.background = rgb(L.fill);   // preview of the cleared spot
+    M.lift = place(document.createElement('img'), L.ink); M.lift.className='mv-lift'; M.lift.src=L.png; M.lift.draggable=false;
+    M.bar = div('mv-bar'); M.bar.innerHTML = `<span class="d"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Apply ↵</button>`;
+    M.bar.querySelector('[data-x]').onclick=cancelMove; M.bar.querySelector('[data-ok]').onclick=applyMove;
+    M.bar.addEventListener('pointerdown', e=>e.stopPropagation());
+    ov.append(M.hole, M.lift, M.bar);
+    M.lift.addEventListener('pointerdown', e => {
+      if(e.button!==0) return;
+      e.stopPropagation(); e.preventDefault(); M.lift.setPointerCapture(e.pointerId); M.lift.classList.add('dragging');
+      const s0={cx:e.clientX, cy:e.clientY, dx:M.dx, dy:M.dy};
+      const mv = ev => { const k=st.scale; moveTo(s0.dx+(ev.clientX-s0.cx)/k, s0.dy+(ev.clientY-s0.cy)/k, true); };
+      const up = () => { M.lift.removeEventListener('pointermove', mv); M.lift.removeEventListener('pointerup', up); M.lift.classList.remove('dragging'); setTimeout(()=>guides(null),400); };
+      M.lift.addEventListener('pointermove', mv); M.lift.addEventListener('pointerup', up);
+    });
+    moveTo(0,0,false);
+    toast(L.kind==='text' ? 'Picked up live text. Drag it, or use arrow keys.' : 'Picked up. Drag it, or use arrow keys (⇧ = 2pt).');
+  }catch(e){ sel.remove(); toast('Nothing to move there: '+e.message,'warn'); }
+}
+function moveTo(dx, dy, doSnap){
+  const M=st.mv; if(!M) return; const k=st.scale, L=M.L;
+  if(doSnap){
+    const r = snap(M.i, L.left+dx, L.baseline!=null ? L.baseline+dy : null);
+    dx = r.x-L.left; if(L.baseline!=null) dy = r.y-L.baseline; guides(M.i, r.sx, r.sy);
+  }
+  M.dx=dx; M.dy=dy;
+  M.lift.style.transform=`translate(${dx*k}px,${dy*k}px)`;
+  Object.assign(M.bar.style,{left:(L.ink[0]+dx)*k+'px', top:((L.ink[1]+dy)*k-40)+'px'});
+  M.bar.querySelector('.d').textContent = `Δ ${dx>=0?'+':''}${dx.toFixed(2)}, ${dy>=0?'+':''}${dy.toFixed(2)} pt`;
+}
+async function applyMove(){
+  const M=st.mv; if(!M) return;
+  if(Math.abs(M.dx)<0.01 && Math.abs(M.dy)<0.01){ cancelMove(); return; }
+  try{
+    const r = await post('/api/move', {page:M.i, rect:M.rect, dx:M.dx, dy:M.dy, fill:M.L.fill});
+    setMeta(r); st.edits++; updCount(); const i=M.i; cancelMove(); await loadPage(i,true);
+    toast(r.kind==='text' ? 'Moved (still live text, same font).' : 'Moved.');
+  }catch(e){ toast('Move failed: '+e.message,'err'); }
+}
+function cancelMove(){ const M=st.mv; if(!M) return; M.hole.remove(); M.lift.remove(); M.bar.remove(); guides(null); st.mv=null; }
+function relayout(){   // after zoom
+  const P=st.P; if(P){ place(P.sel, P.rect); place(P.cover, P.rect); preview(); }
+  const M=st.mv; if(M){ place(M.hole, M.L.ink); place(M.lift, M.L.ink); moveTo(M.dx, M.dy, false); }
+}
 
 /* ---------- toolbar */
 function setMode(m){
-  st.mode=m; cancelEdit(); closePop(); if(st.pickRef) pickRef(false);
+  st.mode=m; cancelEdit(); closePatch(); cancelMove(); if(st.pickRef) pickRef(false);
   document.body.className='mode-'+m;
   document.querySelectorAll('#modeSeg button').forEach(b=>b.classList.toggle('on', b.dataset.mode===m));
 }
@@ -408,19 +612,28 @@ $('#hint').onchange = e => document.querySelectorAll('.ov').forEach(o=>o.classLi
 function zoom(f){
   if(!st.meta) return;
   st.scale = Math.min(4, Math.max(0.5, +(st.scale*f).toFixed(2))); $('#zLbl').textContent=Math.round(st.scale*100);
-  cancelEdit(); closePop(); st.pages.forEach((P,i)=>{ sizePage(i); if(P.loaded>=0){ drawSpans(i); loadPage(i,true);} }); drawRef();
+  cancelEdit(); st.pages.forEach((P,i)=>{ sizePage(i); if(P.loaded>=0){ drawSpans(i); loadPage(i,true);} }); drawRef(); relayout();
 }
 $('#zIn').onclick=()=>zoom(1.2); $('#zOut').onclick=()=>zoom(1/1.2);
-async function undo(){ cancelEdit(); closePop(); setMeta(await post('/api/undo',{})); st.edits=Math.max(0,st.edits-1); updCount(); reloadAll(); }
-async function redo(){ cancelEdit(); closePop(); setMeta(await post('/api/redo',{})); st.edits++; updCount(); reloadAll(); }
+async function undo(){ cancelEdit(); closePatch(); cancelMove(); setMeta(await post('/api/undo',{})); st.edits=Math.max(0,st.edits-1); updCount(); reloadAll(); }
+async function redo(){ cancelEdit(); closePatch(); cancelMove(); setMeta(await post('/api/redo',{})); st.edits++; updCount(); reloadAll(); }
 $('#undo').onclick=undo; $('#redo').onclick=redo;
 $('#dl').onclick = () => { location.href='/api/download'; };
 document.addEventListener('keydown', e => {
-  if(e.target.closest('input,textarea')) return;
+  if(e.target.closest('input,textarea,select')) return;
+  const arrow = {ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+  if(arrow && (st.mv || st.P)){            // nudge: 0.25pt, shift = 2pt
+    e.preventDefault(); const s=e.shiftKey?2:0.25;
+    if(st.mv) moveTo(st.mv.dx+arrow[0]*s, st.mv.dy+arrow[1]*s, false);
+    else { $('#pX').value=(num('#pX')+arrow[0]*s).toFixed(2); $('#pY').value=(num('#pY')+arrow[1]*s).toFixed(2); if(arrow[0]) setAlign('left'); preview(); }
+    return;
+  }
+  if(e.key==='Enter' && st.mv){ e.preventDefault(); applyMove(); return; }
+  if((e.metaKey||e.ctrlKey) && e.key==='Enter' && st.P){ e.preventDefault(); applyPatch(); return; }
   if((e.metaKey||e.ctrlKey) && e.key.toLowerCase()==='z'){ e.preventDefault(); e.shiftKey ? redo() : undo(); }
-  else if(e.key==='e') setMode('edit'); else if(e.key==='p') setMode('patch');
-  else if(e.key==='Escape'){ cancelEdit(); closePop(); if(st.pickRef) pickRef(false); }
-  else if(e.key==='r' && st.mode==='patch') pickRef(!st.pickRef);
+  else if(e.key==='e') setMode('edit'); else if(e.key==='p') setMode('patch'); else if(e.key==='m') setMode('move');
+  else if(e.key==='Escape'){ cancelEdit(); closePatch(); cancelMove(); if(st.pickRef) pickRef(false); }
+  else if(e.key==='r' && (st.mode==='patch'||st.mode==='move')) pickRef(!st.pickRef);
 });
 
 /* resume an already-open doc (server restarts keep nothing; page reloads keep the doc) */

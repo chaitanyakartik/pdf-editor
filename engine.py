@@ -212,32 +212,27 @@ def edit_span(doc: pymupdf.Document, pno: int, span_id: int, new_text: str, fit:
             "collateral": [m for m in missing if m.strip()][:5]}
 
 
-def patch(doc: pymupdf.Document, pno: int, rect, fill, text: str, size: float, color, fontname="helv",
-          x=None, baseline=None, pitch=None, fit=False, hscale=1.0) -> None:
-    """For scans / image text: paint a box (fill=None for transparent) and write text in it.
-    With x/baseline (from scan.analyze: x = left edge of the ink) the text sits exactly where the old text was."""
+def move_text(doc: pymupdf.Document, pno: int, rect, dx: float, dy: float) -> int:
+    """Real-text pages: move every span whose centre is inside rect by (dx, dy), keeping its font,
+    size and colour. Returns how many spans moved."""
     page = doc[pno]
     r = pymupdf.Rect(rect)
-    if fill is not None:
-        page.draw_rect(r, color=None, fill=fill, overlay=True, width=0)
-    if not text.strip():
-        return
-    font = pymupdf.Font(fontname)
-    lines = text.split("\n")
-    if baseline is None:  # nothing detected: centre the first line in the box
-        x, baseline = r.x0 + 1, r.y0 + (r.height - size) / 2 + font.ascender * size * 0.95
-        fit = True
-    widest = max(font.text_length(l, fontsize=size) for l in lines) * hscale
-    room = r.x1 - x - 1
-    if fit and widest > room > 0:
-        size *= room / widest
-    pitch = pitch or size * 1.2
-    tw = pymupdf.TextWriter(page.rect)
-    for k, line in enumerate(lines):
-        # x is where INK starts (measured off the scan); shift back by the first letter's left bearing
-        first = line.lstrip()[:1]
-        lsb = font.glyph_bbox(ord(first)).x0 * size * hscale if first and font.has_glyph(ord(first)) else 0
-        tw.append((x - lsb, baseline + k * pitch), line, font=font, fontsize=size)
-    # horizontal scaling around the text's start point (narrow/wide typefaces on scans)
-    morph = (pymupdf.Point(x, baseline), pymupdf.Matrix(hscale, 1)) if abs(hscale - 1) > 1e-3 else None
-    tw.write_text(page, color=color, morph=morph)
+    spans = [s for s in get_spans(page) if s["editable"] and pymupdf.Point((s["bbox"][0] + s["bbox"][2]) / 2, (s["bbox"][1] + s["bbox"][3]) / 2) in r]
+    if not spans:
+        return 0
+    fonts = [pick_font(doc, page, s, s["text"])[0] for s in spans]  # before redaction drops anything
+    for s in spans:
+        page.add_redact_annot(_kill_rect(s))
+    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE, graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                          text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+    for s, f in zip(spans, fonts):
+        tw = pymupdf.TextWriter(page.rect)
+        tw.append((s["origin"][0] + dx, s["origin"][1] + dy), s["text"], font=f, fontsize=s["size"])
+        tw.write_text(page, color=_rgb(s["color"]), opacity=s["alpha"] / 255 if s["alpha"] < 255 else -1)
+    return len(spans)
+
+
+def region_is_image(page: pymupdf.Page, rect) -> bool:
+    """True when what's visible in rect comes from an image (scan / photo), not live text."""
+    r = pymupdf.Rect(rect)
+    return any(pymupdf.Rect(i["bbox"]).intersects(r) for i in page.get_image_info())

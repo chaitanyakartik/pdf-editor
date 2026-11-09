@@ -202,3 +202,56 @@ def analyze(page: pymupdf.Page, rect) -> dict:
         out["font"] = "hebo" if _stroke_ratio(mask, first) > 0.21 else "helv"
     out["font_label"] = CANDIDATES[out["font"]]
     return out
+
+
+# ---------------------------------------------------------------- move
+
+def _ink_rgba(page, rect):
+    """Render rect, return (bg, mask, rgba uint8, Rect of the ink in pt) — ink keeps its own
+    colour, paper becomes transparent (soft alpha keeps anti-aliased edges)."""
+    r = pymupdf.Rect(rect)
+    m = 2
+    outer = (r + (-m, -m, m, m)) & page.rect
+    img = _render(page, outer)
+    bg = _bg(img)
+    ox, oy = int(round((r.x0 - outer.x0) * Z)), int(round((r.y0 - outer.y0) * Z))
+    inner = img[oy:oy + int(r.height * Z), ox:ox + int(r.width * Z)]
+    dist = np.abs(inner - bg).sum(axis=2)
+    mask = dist > 120
+    if mask.sum() < 10:
+        return bg, mask, None, None
+    ys, xs = np.where(dist > 45)
+    y0, y1, x0, x1 = max(ys.min() - 1, 0), ys.max() + 2, max(xs.min() - 1, 0), xs.max() + 2
+    crop, d = inner[y0:y1, x0:x1], dist[y0:y1, x0:x1]
+    alpha = np.clip((d - 30) / 90.0, 0, 1)
+    rgba = np.dstack([crop, (alpha * 255)]).astype(np.uint8)
+    ink = pymupdf.Rect(r.x0 + x0 / Z, r.y0 + y0 / Z, r.x0 + x1 / Z, r.y0 + y1 / Z)
+    return bg, mask, rgba, ink
+
+
+def _png(rgba: np.ndarray) -> bytes:
+    h, w = rgba.shape[:2]
+    return pymupdf.Pixmap(pymupdf.csRGB, w, h, np.ascontiguousarray(rgba).tobytes(), 1).tobytes("png")
+
+
+def lift(page: pymupdf.Page, rect) -> dict | None:
+    """What Move picks up: the ink (transparent PNG), its box, the paper colour, first baseline."""
+    bg, mask, rgba, ink = _ink_rgba(page, rect)
+    if rgba is None:
+        return None
+    lines = [_line_metrics(mask, a, b) for a, b in _lines(mask)]
+    r = pymupdf.Rect(rect)
+    return {"png": _png(rgba), "ink": [ink.x0, ink.y0, ink.x1, ink.y1], "fill": (bg / 255).round(3).tolist(),
+            "baseline": r.y0 + lines[0]["baseline"] / Z if lines else None,
+            "left": r.x0 + lines[0]["x0"] / Z if lines else ink.x0}
+
+
+def move_pixels(page: pymupdf.Page, rect, dx: float, dy: float, fill) -> None:
+    """Scans: paint the paper colour over the old ink, paste the ink (transparent PNG) at the new spot."""
+    bg, _, rgba, ink = _ink_rgba(page, rect)
+    if rgba is None:
+        raise ValueError("nothing to move in that box")
+    png = _png(rgba)
+    page.draw_rect(ink + (-0.5, -0.5, 0.5, 0.5), color=None, fill=fill if fill is not None else (bg / 255).tolist(),
+                   overlay=True, width=0)
+    page.insert_image(ink + (dx, dy, dx, dy), stream=png, keep_proportion=False, overlay=True)

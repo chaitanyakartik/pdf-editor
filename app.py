@@ -9,6 +9,9 @@ import threading
 import pymupdf
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 
+import base64
+
+import compose
 import engine
 import scan
 
@@ -125,16 +128,72 @@ def analyze():
     return jsonify(scan.analyze(_doc()[j["page"]], j["rect"]))
 
 
+def _spec(j) -> dict:
+    keys = ("rect", "fill", "text", "font", "size", "color", "x", "baseline", "pitch", "hscale", "spacing", "align", "fit")
+    return {k: j.get(k) for k in keys}
+
+
+@app.get("/api/fonts")
+def fonts():
+    return jsonify(compose.fonts())
+
+
+@app.post("/api/preview")
+def preview():
+    """Exactly what /api/patch would draw, rendered from a scratch copy of the page."""
+    j = request.get_json()
+    try:
+        clip, png = compose.preview(_doc(), j["page"], _spec(j), min(float(j.get("zoom", 3)), 6))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if png is None:
+        return jsonify({"clip": None, "png": None})
+    return jsonify({"clip": clip, "png": "data:image/png;base64," + base64.b64encode(png).decode()})
+
+
 @app.post("/api/patch")
 def patch():
     j = request.get_json()
     _snapshot()
-    engine.patch(_doc(), j["page"], j["rect"], j.get("fill"), j.get("text", ""),
-                 float(j.get("size", 11)), j.get("color", [0, 0, 0]), j.get("font", "helv"),
-                 x=j.get("x"), baseline=j.get("baseline"), pitch=j.get("pitch"),
-                 fit=j.get("fit", False), hscale=float(j.get("hscale", 1.0)))
+    try:
+        compose.draw(_doc()[j["page"]], _spec(j))
+    except ValueError as e:
+        S["doc"] = pymupdf.open(stream=S["undo"].pop(), filetype="pdf")
+        return jsonify({"error": str(e)}), 400
     _bump()
     return jsonify(_meta())
+
+
+@app.post("/api/lift")
+def lift():
+    """Move tool: the ink in a box as a transparent PNG + where it is."""
+    j = request.get_json()
+    page = _doc()[j["page"]]
+    out = scan.lift(page, j["rect"])
+    if out is None:
+        return jsonify({"error": "nothing in that box"}), 400
+    out["png"] = "data:image/png;base64," + base64.b64encode(out["png"]).decode()
+    out["kind"] = "pixels" if engine.region_is_image(page, j["rect"]) or not engine.get_spans(page) else "text"
+    return jsonify(out)
+
+
+@app.post("/api/move")
+def move():
+    j = request.get_json()
+    d, pno, dx, dy = _doc(), j["page"], float(j["dx"]), float(j["dy"])
+    page = d[pno]
+    _snapshot()
+    try:
+        if not engine.region_is_image(page, j["rect"]) and engine.move_text(d, pno, j["rect"], dx, dy):
+            kind = "text"
+        else:
+            scan.move_pixels(page, j["rect"], dx, dy, j.get("fill"))
+            kind = "pixels"
+    except ValueError as e:
+        S["doc"] = pymupdf.open(stream=S["undo"].pop(), filetype="pdf")
+        return jsonify({"error": str(e)}), 400
+    _bump()
+    return jsonify({**_meta(), "kind": kind})
 
 
 @app.post("/api/undo")
