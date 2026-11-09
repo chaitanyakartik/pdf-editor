@@ -305,6 +305,7 @@ $('#refClr').onclick = clearRef;
 function clearRef(){ st.ref=null; document.querySelectorAll('.refmark,.refline').forEach(n=>n.remove()); $('#refChip').hidden=true; $('#refBtn').hidden=false; }
 async function setRef(i, rect, sel){
   pickRef(false);
+  toast('Reading reference…');
   try{
     const a = await post('/api/analyze', {page:i, rect});
     sel.remove();

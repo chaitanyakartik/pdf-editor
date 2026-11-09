@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import os
 import sys
+import threading
 
 import pymupdf
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
@@ -17,6 +18,24 @@ app = Flask(__name__, static_folder=None)
 
 # single-user state: the working doc + an undo stack of snapshots
 S: dict = {"doc": None, "name": "", "undo": [], "redo": [], "ver": 0}
+
+
+# Threaded server (a single-threaded one hangs whenever Chrome holds an idle preconnect socket),
+# with every /api call serialised: PyMuPDF documents are not thread-safe.
+_LOCK = threading.Lock()
+
+
+@app.before_request
+def _lock():
+    if request.path.startswith("/api/"):
+        _LOCK.acquire()
+        request.environ["pdfedit.locked"] = True
+
+
+@app.teardown_request
+def _unlock(_exc):
+    if request.environ.pop("pdfedit.locked", False):
+        _LOCK.release()
 
 
 def _doc() -> pymupdf.Document:
@@ -150,4 +169,4 @@ if __name__ == "__main__":
         with open(sys.argv[1], "rb") as fh:
             S.update(doc=pymupdf.open(stream=fh.read(), filetype="pdf"), name=os.path.basename(sys.argv[1]))
     print(f"PDF editor on http://localhost:{PORT}", flush=True)
-    app.run(host="127.0.0.1", port=PORT, debug=False, threaded=False)
+    app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)
