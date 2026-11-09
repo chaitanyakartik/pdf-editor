@@ -35,6 +35,18 @@ colour, shrink-to-fit. Every change re-renders a **preview** over the page: a fl
 transparent PNG drawn by the same `compose.draw` code as Apply (checked pixel-identical). Drag the previewed text or use
 arrow keys (0.25pt, Shift = 2pt) to position it; it snaps to the reference's left edge and line grid. ⌘↵ applies.
 
+**Multi-line boxes re-type only what you change.** OCR keeps each line's text, ink box, left edge and baseline
+(bullets OCR misreads as "e" are left as pixels; "|" mid-line is read as "I"). The panel diffs your edit against
+that: a changed line is covered by its own box (to half the gap to its neighbours) and re-typed at its own position;
+unchanged lines stay original pixels, so indents, bullets and paragraph gaps survive. `tests/ui_bigbox.py`: box over
+the whole letter body, edit one line → 0 changed pixels outside that line.
+
+**Dark Reader**: the page carries `<meta name="darkreader-lock">` and covers are canvas pixels; Dark Reader
+recoloured the CSS-white cover box black (2026-11-09).
+
+**Sessions** persist to `~/Library/Application Support/Redline/session.pkl` (doc + 20 undo steps) on every change;
+`python app.py` with no file restores it. Test servers: `REDLINE_NO_SESSION=1 PORT=43070 python app.py <pdf>`.
+
 ## Move (`M`)
 Box some text → it's lifted (ink as a transparent PNG, its old spot shown cleared) → drag it or use arrow keys,
 snapping to the reference → Enter. On scans (an image under the box) the scanned pixels move, so it looks identical;

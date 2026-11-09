@@ -4,7 +4,9 @@ from __future__ import annotations
 import io
 import os
 import sys
+import pickle
 import threading
+from pathlib import Path
 
 import pymupdf
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
@@ -59,8 +61,33 @@ def _meta():
             "pages": [{"w": p.rect.width, "h": p.rect.height} for p in d]}
 
 
+# Session on disk: every change (with up to 20 undo steps) survives a server restart.
+SESSION = Path(os.environ.get("REDLINE_SESSION", Path.home() / "Library/Application Support/Redline/session.pkl"))
+
+
+def _persist():
+    if S["doc"] is None or os.environ.get("REDLINE_NO_SESSION"):
+        return
+    SESSION.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SESSION.with_suffix(".tmp")
+    with open(tmp, "wb") as fh:
+        pickle.dump({"doc": S["doc"].tobytes(), "name": S["name"], "undo": S["undo"][-20:], "redo": S["redo"][-20:]}, fh)
+    os.replace(tmp, SESSION)
+
+
+def _restore() -> bool:
+    try:
+        with open(SESSION, "rb") as fh:
+            d = pickle.load(fh)
+        S.update(doc=pymupdf.open(stream=d["doc"], filetype="pdf"), name=d["name"], undo=d["undo"], redo=d["redo"])
+        return True
+    except (OSError, pickle.PickleError, EOFError, KeyError):
+        return False
+
+
 def _bump():
     S["ver"] += 1
+    _persist()
 
 
 @app.get("/")
@@ -129,7 +156,7 @@ def analyze():
 
 
 def _spec(j) -> dict:
-    keys = ("rect", "fill", "text", "font", "size", "color", "x", "baseline", "pitch", "hscale", "spacing", "align", "fit")
+    keys = ("rect", "fill", "text", "font", "size", "color", "x", "baseline", "pitch", "hscale", "spacing", "align", "fit", "items")
     return {k: j.get(k) for k in keys}
 
 
@@ -224,8 +251,18 @@ def download():
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:  # optional: preload a file
-        with open(sys.argv[1], "rb") as fh:
-            S.update(doc=pymupdf.open(stream=fh.read(), filetype="pdf"), name=os.path.basename(sys.argv[1]))
+    # app.py                      -> restore the last session (doc + undo history), if any
+    # app.py file.pdf             -> open file.pdf fresh
+    # app.py file.pdf --undo-base older.pdf  -> open file.pdf with older.pdf as one undo step
+    args = sys.argv[1:]
+    if args:
+        with open(args[0], "rb") as fh:
+            S.update(doc=pymupdf.open(stream=fh.read(), filetype="pdf"), name=os.path.basename(args[0]))
+        if "--undo-base" in args:
+            with open(args[args.index("--undo-base") + 1], "rb") as fh:
+                S["undo"] = [fh.read()]
+        _persist()
+    elif _restore():
+        print(f"restored session: {S['name']} ({len(S['undo'])} undo steps)", flush=True)
     print(f"PDF editor on http://localhost:{PORT}", flush=True)
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)

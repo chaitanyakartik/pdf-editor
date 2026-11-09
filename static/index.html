@@ -3,11 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- the app is dark already; stop Dark Reader & co. from recolouring the page (it turned white covers black) -->
+<meta name="darkreader-lock">
+<meta name="color-scheme" content="dark">
 <title>Redline PDF</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root{
+  color-scheme:dark;
   --ink:#16161d; --ink-2:#22222c; --ink-3:#2e2e3a; --line:#3a3a48;
   --paper:#f3efe6; --muted:#9a98a8; --text:#ecebf2;
   --red:#ff4d3d; --red-soft:rgba(255,77,61,.16); --amber:#ffb84d; --mint:#3ddc97;
@@ -115,13 +119,13 @@ body.insp-open main{padding-right:350px}
 .insp .hint{font-size:11px;color:var(--muted);line-height:1.4}
 .insp .act{display:flex;gap:8px;margin-top:auto;padding-top:8px} .insp .act .btn{flex:1;justify-content:center}
 .insp .err{color:var(--red);font-size:12px}
-.pv-cover{position:absolute;pointer-events:none}
+.pv-cover{position:absolute;pointer-events:none;forced-color-adjust:none}
 .pv-text{position:absolute;cursor:move;outline:1px dashed rgba(106,168,255,.8);outline-offset:1px}
 .pv-text.dragging{outline-color:var(--blue)}
 .guide{position:absolute;pointer-events:none;border:0 dashed var(--mint);z-index:4}
 .guide.v{width:0;top:0;bottom:0;border-left-width:1.5px} .guide.h{height:0;left:0;right:0;border-top-width:1.5px}
 /* move */
-.mv-hole{position:absolute;pointer-events:none}
+.mv-hole{position:absolute;pointer-events:none;forced-color-adjust:none}
 .mv-lift{position:absolute;cursor:grab;outline:1.5px dashed var(--amber);outline-offset:2px;z-index:3}
 .mv-lift.dragging{cursor:grabbing}
 .mv-bar{position:absolute;z-index:6;display:flex;gap:6px;align-items:center;background:var(--ink-2);border:1px solid var(--line);
@@ -329,6 +333,13 @@ async function commitEdit(){
 let drag=null;
 const place = (el, r) => { const k=st.scale; Object.assign(el.style,{left:r[0]*k+'px',top:r[1]*k+'px',width:(r[2]-r[0])*k+'px',height:(r[3]-r[1])*k+'px'}); return el; };
 const div = (cls) => { const d=document.createElement('div'); d.className=cls; return d; };
+// covers are 1px canvases stretched over the area: pixels, not CSS colour, so page-recolouring
+// extensions (Dark Reader) can't turn a white cover black
+function colorBox(cls, rect, fill){
+  const c=document.createElement('canvas'); c.width=c.height=1; c.className=cls;
+  const g=c.getContext('2d'); g.fillStyle=rgb(fill); g.fillRect(0,0,1,1);
+  return place(c, rect);
+}
 function bindOverlay(i){
   const ov = st.pages[i].el.querySelector('.ov');
   ov.addEventListener('pointerdown', e => {
@@ -425,7 +436,7 @@ function openPatch(i, rect, sel){
   closePatch();
   const ov = st.pages[i].el.querySelector('.ov');
   const P = st.P = {i, rect, sel, tgt:null, align:'left', bold:false, italic:false, seq:0};
-  P.cover = place(div('pv-cover'), rect); P.cover.style.background='#fff'; ov.appendChild(P.cover);
+  P.covers = []; P.lines = []; P.base = {x:rect[0]+1, y:null};
   P.pv = document.createElement('img'); P.pv.className='pv-text'; P.pv.hidden=true; P.pv.draggable=false; ov.appendChild(P.pv);
   bindTextDrag(P.pv);
   $('#insp').hidden=false; document.body.classList.add('insp-open');
@@ -449,6 +460,8 @@ function decide(){
   const P=st.P, a=P && P.tgt; if(!a) return;
   const R = st.ref && $('#pUseRef').checked ? st.ref : null, rect=P.rect;
   $('#pFill').value = hex(a.fill);
+  P.lines = a.lines || [];
+  if(P.lines.length) P.base = {x: Math.min(...P.lines.map(l=>l.x)), y: P.lines[0].baseline};
   const S = R ? R.a : (a.size ? a : null);
   if(!S){ $('#pDet').textContent='empty area'; return; }
   $('#pSize').value=S.size; setFontUI(S.font); $('#pColor').value=hex(S.color);
@@ -461,6 +474,7 @@ function decide(){
     y = g && Math.abs(guess-b0) < 40*g ? b0 + Math.round((guess-b0)/g)*g : guess;
   }
   const x = R ? R.left : (a.lines.length ? Math.min(...a.lines.map(l=>l.x)) : rect[0]+1);
+  if(!P.lines.length) P.base = {x, y};
   $('#pX').value=x.toFixed(2); $('#pY').value=y.toFixed(2); setAlign('left');
   $('#pDet').textContent = (R?'REF · ':'') + `${fontLabel(S.font)} ${S.size}pt` + (R ? '' : (S.match!=null?` · ${Math.round(S.match*100)}% shape match`:''));
 }
@@ -487,12 +501,46 @@ function spec(){
     hscale:(num('#pWidth')||100)/100, spacing:num('#pSpacing')||0, pitch:num('#pPitch'), align:P.align,
     x:num('#pX'), baseline:num('#pY'), fit:$('#pFit').checked, fill:$('#pCover').checked ? unhex($('#pFill').value) : null};
 }
+/* Box with 2+ lines of text: diff the edited text against what OCR read and re-type ONLY the changed
+   lines, each covered by its own ink box and kept at its own left edge + baseline (indents, bullets,
+   paragraph gaps survive). Unchanged lines stay original pixels. Left/Baseline edits and drags shift
+   the changed lines only. Returns null for single-line / empty boxes (one cover = the box). */
+function lineItems(sp){
+  const P=st.P, L=P.lines; if(!L || L.length<2) return null;
+  const nw=sp.text.split('\n'), old=L.map(l=>l.text.trim());
+  const offX=(sp.x ?? P.base.x)-P.base.x, offY=(sp.baseline ?? P.base.y)-P.base.y;
+  const pitch=sp.pitch || P.tgt.pitch || sp.size*1.2;
+  const cov = i => { const b=L[i].box;
+    const up = i>0 ? (b[1]-L[i-1].box[3])/2 : 2, dn = i<L.length-1 ? (L[i+1].box[1]-b[3])/2 : 2;
+    return [b[0]-1, b[1]-Math.max(0.3,Math.min(6,up)), b[2]+1, b[3]+Math.max(0.3,Math.min(6,dn))]; };   // half the gap to the next line: catches handwriting tails
+  const items=[];
+  if(nw.length===old.length){
+    nw.forEach((t,i)=>{ if(t.trim()!==old[i]) items.push({rect:cov(i), text:t, x:L[i].x+offX, baseline:L[i].baseline+offY, fill:sp.fill}); });
+    items.changed = items.length;
+  } else {   // lines added/removed: re-flow from the first difference to the end
+    let f=0; while(f<old.length && f<nw.length && nw[f].trim()===old[f]) f++;
+    const covers=[]; for(let i=f;i<old.length;i++) covers.push(cov(i));
+    covers.forEach(c=>items.push({rect:c, text:'', fill:sp.fill}));
+    const a = f<L.length ? L[f] : L[L.length-1], y0 = f<L.length ? a.baseline : a.baseline+pitch;
+    const txt = nw.slice(f).join('\n');
+    const area = covers.length ? covers.reduce((u,c)=>[Math.min(u[0],c[0]),Math.min(u[1],c[1]),Math.max(u[2],c[2]),Math.max(u[3],c[3])]) : [a.box[0], y0-sp.size, P.rect[2], y0+4];
+    if(txt.trim()) items.push({rect:area, text:txt, x:a.x+offX, baseline:y0+offY, pitch, fill:null});
+    items.changed = Math.max(old.length-f, nw.length-f);
+  }
+  return items;
+}
 let pvT;
 function preview(){ clearTimeout(pvT); pvT=setTimeout(doPreview, 80); }
 async function doPreview(){
   const P=st.P; if(!P) return;
-  const sp=spec(), seq=++P.seq;
-  P.cover.hidden = !sp.fill; if(sp.fill) P.cover.style.background=rgb(sp.fill);
+  const sp=spec(), seq=++P.seq, items=lineItems(sp);
+  if(items) sp.items=items;
+  // covers: one per changed line (multi-line box) or the whole box
+  P.covers.forEach(c=>c.remove());
+  const ov=st.pages[P.i].el.querySelector('.ov');
+  P.covers = (items ? items.filter(it=>it.fill).map(it=>it.rect) : (sp.fill ? [P.rect] : [])).map(r=>colorBox('pv-cover', r, sp.fill));
+  P.covers.forEach(c=>ov.insertBefore(c, P.pv));
+  if(items) $('#pDet').textContent = `${P.lines.length} lines · ${items.changed || 'none'} changed` + (items.changed ? ', only those are re-typed' : '');
   try{
     const r = await post('/api/preview', {...sp, zoom:Math.min(6, st.scale*(window.devicePixelRatio||1))});
     if(st.P!==P || seq!==P.seq) return;
@@ -521,7 +569,8 @@ function bindTextDrag(img){
 }
 async function applyPatch(){
   const P=st.P; if(!P) return;
-  const sp=spec(), pg=P.i;
+  const sp=spec(), pg=P.i, items=lineItems(sp);
+  if(items){ if(!items.length){ toast('Nothing changed: edit a line first.','warn'); return; } sp.items=items; }
   $('#pApply').disabled=true;
   try{
     setMeta(await post('/api/patch', sp)); st.edits++; updCount();
@@ -531,7 +580,7 @@ async function applyPatch(){
 }
 function closePatch(){
   const P=st.P; if(!P) return;
-  P.sel.remove(); P.cover.remove(); P.pv.remove(); guides(null);
+  P.sel.remove(); P.covers.forEach(c=>c.remove()); P.pv.remove(); guides(null);
   st.P=null; $('#insp').hidden=true; document.body.classList.remove('insp-open');
 }
 // every control re-renders the preview
@@ -557,7 +606,7 @@ async function startMove(i, rect, sel){
     sel.remove();
     const ov=st.pages[i].el.querySelector('.ov');
     const M = st.mv = {i, rect, L, dx:0, dy:0};
-    M.hole = place(div('mv-hole'), L.ink); M.hole.style.background = rgb(L.fill);   // preview of the cleared spot
+    M.hole = colorBox('mv-hole', L.ink, L.fill);   // preview of the cleared spot
     M.lift = place(document.createElement('img'), L.ink); M.lift.className='mv-lift'; M.lift.src=L.png; M.lift.draggable=false;
     M.bar = div('mv-bar'); M.bar.innerHTML = `<span class="d"></span><button class="btn" data-x>Cancel</button><button class="btn primary" data-ok>Apply ↵</button>`;
     M.bar.querySelector('[data-x]').onclick=cancelMove; M.bar.querySelector('[data-ok]').onclick=applyMove;
@@ -597,7 +646,7 @@ async function applyMove(){
 }
 function cancelMove(){ const M=st.mv; if(!M) return; M.hole.remove(); M.lift.remove(); M.bar.remove(); guides(null); st.mv=null; }
 function relayout(){   // after zoom
-  const P=st.P; if(P){ place(P.sel, P.rect); place(P.cover, P.rect); preview(); }
+  const P=st.P; if(P){ place(P.sel, P.rect); preview(); }
   const M=st.mv; if(M){ place(M.hole, M.L.ink); place(M.lift, M.L.ink); moveTo(M.dx, M.dy, false); }
 }
 

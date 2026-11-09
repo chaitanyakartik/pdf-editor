@@ -143,7 +143,15 @@ def layout(spec) -> dict:
 
 
 def draw(page: pymupdf.Page, spec) -> pymupdf.Rect:
-    """Cover + write. Returns the area touched (for preview clipping)."""
+    """Cover + write. Returns the area touched (for preview clipping).
+    spec["items"]: list of per-line overrides (rect/text/x/baseline/fill/pitch) drawn with the shared style,
+    so only the lines that changed get covered and re-typed."""
+    if spec.get("items") is not None:
+        touched = None
+        for it in spec["items"]:
+            t = draw(page, {**spec, **it, "items": None})
+            touched = t if touched is None else touched | t
+        return touched if touched is not None else pymupdf.Rect()
     r = pymupdf.Rect(spec["rect"])
     touched = pymupdf.Rect(r)
     if spec.get("fill") is not None:
@@ -173,13 +181,18 @@ def preview(doc: pymupdf.Document, pno: int, spec, zoom: float):
     """The new text alone, as a transparent PNG, drawn by the same code as apply. The UI lays it over
     the page above a flat cover box (the cover is a plain fill, so that composite == the applied result).
     Returns (clip, png) or (None, None) when there's no text."""
-    if not (spec.get("text") or "").strip():
+    parts = [{**spec, **it, "items": None} for it in spec["items"]] if spec.get("items") is not None else [spec]
+    parts = [p for p in parts if (p.get("text") or "").strip()]
+    if not parts:
         return None, None
     src = doc[pno].rect
     tmp = pymupdf.open()
     pg = tmp.new_page(width=src.width, height=src.height)
-    L = layout(spec)
-    draw(pg, {**spec, "fill": None})
-    area = (L["bbox"] + (-2, -2, 2, 2)) & pg.rect
+    area = None
+    for p in parts:
+        draw(pg, {**p, "fill": None})
+        bb = layout(p)["bbox"]
+        area = bb if area is None else area | bb
+    area = (area + (-2, -2, 2, 2)) & pg.rect
     pix = pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=area, alpha=True)
     return [area.x0, area.y0, area.x1, area.y1], pix.tobytes("png")

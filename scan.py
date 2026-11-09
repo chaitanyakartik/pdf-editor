@@ -86,25 +86,45 @@ def _stroke_ratio(mask, m):
     return float(np.median(runs)) / xh if runs else 0.0
 
 
-def _ocr(img: np.ndarray, bg, single_line: bool) -> list[list[str]]:
-    """Words per line via Tesseract TSV."""
+def _ocr(img: np.ndarray, bg, single_line: bool) -> list[list[tuple]]:
+    """Tesseract TSV -> lines of words, each word (text, x0, y0, x1, y1) in img pixel coords."""
     if not TESSERACT:
         return []
     rgb = img.astype(np.uint8)
     if bg.mean() < 110:  # light text on dark paper: invert so tesseract sees dark-on-light
         rgb = 255 - rgb
-    pad = np.full((rgb.shape[0] + 40, rgb.shape[1] + 40, 3), 255, np.uint8)  # white margin helps tesseract
-    pad[20:-20, 20:-20] = rgb
+    P = 20
+    pad = np.full((rgb.shape[0] + 2 * P, rgb.shape[1] + 2 * P, 3), 255, np.uint8)  # white margin helps tesseract
+    pad[P:-P, P:-P] = rgb
     with tempfile.NamedTemporaryFile(suffix=".png") as f:
         pymupdf.Pixmap(pymupdf.csRGB, pad.shape[1], pad.shape[0], pad.tobytes(), 0).save(f.name)
         r = subprocess.run([TESSERACT, f.name, "-", "--psm", "7" if single_line else "6", "tsv"],
-                           capture_output=True, text=True, timeout=20)
+                           capture_output=True, text=True, timeout=30)
     lines: dict = {}
     for row in r.stdout.splitlines()[1:]:
         c = row.split("\t")
         if len(c) == 12 and c[11].strip() and float(c[10]) > 20:
-            lines.setdefault((c[2], c[3], c[4]), []).append(c[11])
-    return list(lines.values())
+            x, y, w, h = (int(v) for v in c[6:10])
+            lines.setdefault((int(c[2]), int(c[3]), int(c[4])), []).append((c[11], x - P, y - P, x + w - P, y + h - P))
+    return [lines[k] for k in sorted(lines, key=lambda k: min(w[2] for w in lines[k]))]
+
+
+_BULLETS = set("e«°o*-–•·©@»>")
+
+
+def _clean_words(words, W):
+    """'|' at the box edge is a border/bullet fragment: drop it; anywhere else it's a capital I
+    (Tesseract reads 'I am' as '| am'). A leading bullet misread as 'e' / '«' / '°' is dropped so the
+    bullet stays as scanned pixels and is never re-typed."""
+    edge = 4 * Z
+    words = [w for w in words if w[0].strip("|¦") or not (w[1] < edge or w[3] > W - edge)]
+    words = [(w[0].replace("|", "I").replace("¦", "I"),) + tuple(w[1:]) if not w[0].strip("|¦") else w for w in words]
+    if len(words) > 1:
+        t, x0, y0, x1, y1 = words[0]
+        nxt = words[1]
+        if t in _BULLETS and (x1 - x0) <= 1.3 * (y1 - y0) and nxt[1] - x1 > 0.4 * (y1 - y0):
+            words = words[1:]
+    return words
 
 
 def _ink_crop(mask):
@@ -167,35 +187,70 @@ def analyze(page: pymupdf.Page, rect) -> dict:
     core = inner[mask & (dist >= np.percentile(dist[mask], 75))]
     out["color"] = (np.median(core, axis=0) / 255).round(3).tolist()
 
-    lines = [_line_metrics(mask, a, b) for a, b in _lines(mask)]
-    if not lines:
+    mlines = _lines(mask)
+    if not mlines:
         return out
-    out["lines"] = [{"x": r.x0 + l["x0"] / Z, "baseline": r.y0 + l["baseline"] / Z} for l in lines]
-    if len(lines) > 1:
-        out["pitch"] = float(np.median(np.diff([l["baseline"] for l in lines]))) / Z
+    H, W = mask.shape
+    ocr = _ocr(inner, bg, single_line=len(mlines) == 1)
+    # one entry per text line: its text, ink box, left edge and baseline, so the UI can re-type
+    # ONLY the lines that get edited and leave every other line as original pixels
+    L = []
+    for words in ocr:
+        words = _clean_words(words, W)
+        if not words:
+            continue
+        hgt = max(w[4] - w[2] for w in words)
+        a, b_ = max(0, min(w[2] for w in words) - 3), min(H - 1, max(w[4] for w in words) + 3)
+        c0 = max(0, words[0][1] - 6)
+        # extend right over ink that continues without a big gap (handwritten fixes, words OCR
+        # couldn't read) but stop at a gap wider than 1.5 line-heights (next column)
+        cols = mask[a:b_ + 1].any(axis=0)
+        last = words[-1][3]
+        x = last
+        while x < W and x - last <= 1.5 * hgt:
+            if cols[x]:
+                last = x
+            x += 1
+        c1 = min(W, last + 2)
+        sub = mask[a:b_ + 1, c0:c1]
+        if sub.sum() < 5:
+            continue
+        m = _line_metrics(mask[:, c0:c1], a, b_)
+        ys, xs = np.where(sub)
+        box = [r.x0 + (c0 + xs.min()) / Z, r.y0 + (a + ys.min()) / Z, r.x0 + (c0 + xs.max() + 1) / Z, r.y0 + (a + ys.max() + 1) / Z]
+        L.append({"text": " ".join(w[0] for w in words).rstrip("|¦ "), "x": box[0], "baseline": r.y0 + m["baseline"] / Z,
+                  "box": box, "_m": m, "_c": (c0, c1)})
+    if not L:  # no OCR: geometry only
+        for a, b_ in mlines:
+            m = _line_metrics(mask, a, b_)
+            L.append({"text": "", "x": r.x0 + m["x0"] / Z, "baseline": r.y0 + m["baseline"] / Z,
+                      "box": [r.x0 + m["x0"] / Z, r.y0 + a / Z, r.x0 + m["x1"] / Z, r.y0 + (b_ + 1) / Z], "_m": m, "_c": (0, W)})
+    L.sort(key=lambda l: l["baseline"])
+    if len(L) > 1:
+        out["pitch"] = float(np.median(np.diff([l["baseline"] for l in L])))
+    out["text"] = "\n".join(l["text"] for l in L)
 
-    words = _ocr(inner, bg, single_line=len(lines) == 1)
-    # drop bullet/border fragments OCR picks up at a box edge ("| End Date", "• Start")
-    out["text"] = "\n".join(" ".join(w).lstrip("|•·¦ ").rstrip("| ") for w in words)
-
-    first = lines[0]
+    # font + size from the LONGEST line (a 2-letter line like "To" can't pin either down)
+    ref = max(L, key=lambda l: len(l["text"]))
+    first, (c0, c1) = ref["_m"], ref["_c"]
     xh = first["baseline"] - first["xtop"]
     # only the band letters can occupy (ascenders..descenders) so stray marks/logos above don't count
     top = max(first["top"], first["baseline"] - int(1.6 * xh))
     bot = min(first["bottom"], first["baseline"] + int(0.7 * xh))
-    band = np.zeros_like(mask[top:bot + 1]); band[:] = mask[top:bot + 1]
-    match = _match_font(band, " ".join(words[0]), xh / Z / 0.52) if words else None
+    band = mask[top:bot + 1, c0:c1].copy()
+    match = _match_font(band, ref["text"], xh / Z / 0.52) if ref["text"] else None
+    out["lines"] = [{k: v for k, v in l.items() if not k.startswith("_")} for l in L]
     out["hscale"] = 1.0
     if match and match["iou"] >= 0.4:
         # a standard font fits: size from ink WIDTH (blur barely affects a long line's width)
         out.update(font=match["font"], size=round(match["size_w"], 1), match=round(match["iou"], 2), cands=match["cands"])
     elif match:
-        # no standard font fits (e.g. a narrow typeface): Sans/Sans Bold by stroke weight,
-        # match glyph height, squeeze/stretch the width to the scanned line
+        # no standard font fits (e.g. a narrow typeface): Sans/Sans Bold by stroke weight, match glyph
+        # height, squeeze/stretch width to the scan (only trusted on a line long enough to measure)
         f = "hebo" if _stroke_ratio(mask, first) > 0.21 else "helv"
         c = match["cands"][f]
-        out.update(font=f, match=round(match["iou"], 2), size=round(c["size_h"], 1), cands=match["cands"],
-                   hscale=round(float(np.clip(c["size_w"] / c["size_h"], 0.75, 1.25)), 3))
+        hs = float(np.clip(c["size_w"] / c["size_h"], 0.75, 1.25)) if len(ref["text"]) >= 12 else 1.0
+        out.update(font=f, match=round(match["iou"], 2), size=round(c["size_h"], 1), cands=match["cands"], hscale=round(hs, 3))
     else:  # no usable OCR: x-height ~ 0.52 em; thick stems -> bold
         out["size"] = round(xh / Z / 0.52, 1)
         out["cands"] = match and match["cands"]
