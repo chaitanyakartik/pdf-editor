@@ -96,103 +96,247 @@ def _advance(font, line, size, spacing):
     return sum(font.glyph_advance(ord(c)) * size for c in line) + spacing * (len(line) - 1)
 
 
-def layout(spec) -> dict:
-    """Where every line goes. Returns {font, size, lines:[(ox, oy, text)], bbox}."""
-    font = get_font(spec.get("font") or "helv")
+class _Style:
+    def __init__(self, spec):
+        self.fid = spec.get("font") or "helv"
+        self.font = get_font(self.fid)
+        self.size = float(spec.get("size") or 11)
+        self.hs = float(spec.get("hscale") or 1.0)
+        self.sp = float(spec.get("spacing") or 0.0)
+
+    def width(self, s: str) -> float:
+        return _advance(self.font, s, self.size, self.sp) * self.hs
+
+    def lsb(self, s: str) -> float:
+        first = s.lstrip()[:1]
+        return _lsb_em(self.fid, first) * self.size * self.hs if first else 0.0
+
+
+def _wrap(st: _Style, text: str, width: float | None) -> list[str]:
+    """Greedy word wrap to `width` pt (None = no wrap). A word longer than the width gets its own line."""
+    if width is None or width <= 0:
+        return [text]
+    words, out, cur = text.split(), [], ""
+    for w in words:
+        t = f"{cur} {w}" if cur else w
+        if cur and st.width(t) > width:
+            out.append(cur); cur = w
+        else:
+            cur = t
+    out.append(cur)
+    return out
+
+
+def _paragraphs(L: list, pitch: float) -> list[int]:
+    """Paragraph id per original line: a new paragraph starts after a blank-line gap, when a line is
+    indented relative to the body, or after a short line."""
+    xs = sorted(l["x"] for l in L)
+    body = min(xs, key=lambda x: -sum(abs(x - y) < 2 for y in xs))  # most common left edge
+    right = max(l["box"][2] for l in L)
+    pid, out = 0, [0]
+    for i in range(1, len(L)):
+        gap = L[i]["baseline"] - L[i - 1]["baseline"]
+        short_prev = L[i - 1]["box"][2] < right - 0.15 * (right - body)
+        if gap > 1.45 * pitch or L[i]["x"] > body + 5 or short_prev:
+            pid += 1
+        out.append(pid)
+    return out
+
+
+def plan(spec) -> dict:
+    """What gets covered and what gets written; preview and apply both use this.
+    Returns {style, covers:[rect], lines:[{x, y, text, just}], retyped, warn}.
+      x = where the line's INK starts, y = baseline, just = right edge to justify to (or None)."""
+    st = _Style(spec)
     text = spec.get("text") or ""
-    missing = sorted({c for c in text if not c.isspace() and not font.has_glyph(ord(c))})
+    missing = sorted({c for c in text if not c.isspace() and not st.font.has_glyph(ord(c))})
     if missing:
-        raise ValueError(f"{font.name} has no glyph for: {''.join(missing[:10])}")
-    size = float(spec.get("size") or 11)
-    hs = float(spec.get("hscale") or 1.0)
-    sp = float(spec.get("spacing") or 0.0)
-    align = spec.get("align") or "left"
+        raise ValueError(f"{st.font.name} has no glyph for: {''.join(missing[:10])}")
     r = pymupdf.Rect(spec["rect"])
-    lines = text.split("\n")
-    x, baseline = spec.get("x"), spec.get("baseline")
-    if baseline is None:
-        baseline = r.y0 + (r.height - size) / 2 + font.ascender * size * 0.95
-    if x is None:
-        x = r.x0 + 1
+    fill = spec.get("fill")
+    wrap = spec.get("wrap")
+    justify = (spec.get("align") == "justify")
+    orig = spec.get("orig") or []
+    out = {"style": st, "covers": [], "lines": [], "retyped": 0, "warn": None}
 
-    def widths(sz):
-        return [_advance(font, ln, sz, sp) * hs for ln in lines]
+    if len(orig) < 2:
+        # ---- one box: cover it, write the text from (x, baseline), wrapping at the wrap edge
+        if fill is not None:
+            out["covers"].append([r.x0, r.y0, r.x1, r.y1])
+        x, y = spec.get("x"), spec.get("baseline")
+        if y is None:
+            y = r.y0 + (r.height - st.size) / 2 + st.font.ascender * st.size * 0.95
+        if x is None:
+            x = r.x0 + 1
+        if spec.get("fit") and not wrap:
+            widest = max([st.width(l) for l in text.split("\n")] or [0])
+            room = r.x1 - x - 1
+            if widest > room > 0:
+                st.size *= room / widest
+        pitch = float(spec.get("pitch") or st.size * 1.2)
+        k = 0
+        for para in text.split("\n"):
+            rows = _wrap(st, para, (wrap - x) if wrap else None)
+            for j, row in enumerate(rows):
+                w = st.width(row)
+                align = spec.get("align") or "left"
+                ix = (r.x0 + r.x1) / 2 - w / 2 if align == "center" else (r.x1 - 1 - w if align == "right" else x)
+                out["lines"].append({"x": ix, "y": y + k * pitch, "text": row,
+                                     "just": wrap if justify and j < len(rows) - 1 else None})
+                k += 1
+        out["retyped"] = 1 if text.strip() else 0
+        return out
 
-    if spec.get("fit"):
-        room = (r.x1 - x - 1) if align == "left" else (r.width - 2)
-        widest = max(widths(size) or [0])
-        if widest > room > 0:
-            size *= room / widest
-    pitch = float(spec.get("pitch") or size * 1.2)
-    placed, x0s, x1s = [], [], []
-    for k, (ln, w) in enumerate(zip(lines, widths(size))):
-        first = ln.lstrip()[:1]
-        lsb = _lsb_em(spec.get("font") or "helv", first) * size * hs if first else 0
-        if align == "center":
-            ox = (r.x0 + r.x1) / 2 - w / 2
-        elif align == "right":
-            ox = r.x1 - 1 - w
-        else:
-            ox = x - lsb  # x is where INK starts: back off the first letter's side bearing
-        oy = baseline + k * pitch
-        placed.append((ox, oy, ln))
-        x0s.append(ox); x1s.append(ox + w)
-    asc, desc = font.ascender * size, -font.descender * size
-    bbox = pymupdf.Rect(min(x0s), baseline - asc, max(x1s), baseline + (len(lines) - 1) * pitch + desc)
-    return {"font": font, "size": size, "hscale": hs, "spacing": sp, "lines": placed, "bbox": bbox}
+    # ---- several OCR'd lines: re-type only what changed, reflowing within the paragraph
+    L = orig
+    new = text.split("\n")
+    old = [l["text"].strip() for l in L]
+    base = spec.get("base") or [min(l["x"] for l in L), L[0]["baseline"]]
+    offx = (spec.get("x") if spec.get("x") is not None else base[0]) - base[0]
+    offy = (spec.get("baseline") if spec.get("baseline") is not None else base[1]) - base[1]
+    diffs = [L[i + 1]["baseline"] - L[i]["baseline"] for i in range(len(L) - 1)]
+    pitch = float(spec.get("pitch") or (sorted(diffs)[len(diffs) // 2] if diffs else st.size * 1.2))
+    right = wrap if wrap else max(l["box"][2] for l in L)
+    para = _paragraphs(L, pitch)
 
+    def cover(i):
+        b = L[i]["box"]
+        up = (b[1] - L[i - 1]["box"][3]) / 2 if i > 0 else 2
+        dn = (L[i + 1]["box"][1] - b[3]) / 2 if i < len(L) - 1 else 2
+        return [b[0] - 1, b[1] - max(0.3, min(6, up)), b[2] + 1, b[3] + max(0.3, min(6, dn))]
 
-def draw(page: pymupdf.Page, spec) -> pymupdf.Rect:
-    """Cover + write. Returns the area touched (for preview clipping).
-    spec["items"]: list of per-line overrides (rect/text/x/baseline/fill/pitch) drawn with the shared style,
-    so only the lines that changed get covered and re-typed."""
-    if spec.get("items") is not None:
-        touched = None
-        for it in spec["items"]:
-            t = draw(page, {**spec, **it, "items": None})
-            touched = t if touched is None else touched | t
-        return touched if touched is not None else pymupdf.Rect()
-    r = pymupdf.Rect(spec["rect"])
-    touched = pymupdf.Rect(r)
-    if spec.get("fill") is not None:
-        page.draw_rect(r, color=None, fill=spec["fill"], overlay=True, width=0)
-    if not (spec.get("text") or "").strip():
-        return touched
-    L = layout(spec)
-    font, size, hs, sp = L["font"], L["size"], L["hscale"], L["spacing"]
-    color = spec.get("color") or [0, 0, 0]
-    for ox, oy, ln in L["lines"]:
-        if not ln:
+    def put(i_or_y, txt, x, last_in_para):
+        y = L[i_or_y]["baseline"] if isinstance(i_or_y, int) else i_or_y
+        out["lines"].append({"x": x + offx, "y": y + offy, "text": txt,
+                             "just": right + offx if justify and not last_in_para else None})
+
+    if len(new) != len(old):
+        # lines added/removed: re-flow everything from the first difference
+        f = 0
+        while f < min(len(new), len(old)) and new[f].strip() == old[f]:
+            f += 1
+        for i in range(f, len(L)):
+            if fill is not None:
+                out["covers"].append(cover(i))
+        a = L[min(f, len(L) - 1)]
+        y = a["baseline"] if f < len(L) else a["baseline"] + pitch
+        for t in new[f:]:
+            rows = _wrap(st, t, right - a["x"])
+            for j, row in enumerate(rows):
+                out["lines"].append({"x": a["x"] + offx, "y": y + offy, "text": row,
+                                     "just": right + offx if justify and j < len(rows) - 1 else None})
+                y += pitch
+        out["retyped"] = max(len(L) - f, len(new) - f)
+        return out
+
+    changed = [i for i in range(len(L)) if new[i].strip() != old[i]]
+    done, extra_rows = set(), 0
+    for c in changed:
+        if c in done:
             continue
-        tw = pymupdf.TextWriter(page.rect)
-        if sp:  # letter spacing: place glyphs one by one (in unscaled space; morph scales positions too)
-            cx = ox
-            for c in ln:
-                tw.append((cx, oy), c, font=font, fontsize=size)
-                cx += font.glyph_advance(ord(c)) * size + sp / hs
+        p = para[c]
+        last = max(i for i in range(len(L)) if para[i] == p)
+        k, pending = c, new[c].split()
+        while True:
+            x = L[k]["x"] if k <= last else L[last]["x"]
+            row = _wrap(st, " ".join(pending), right - x)
+            line, left = row[0], " ".join(row[1:]).split()
+            nxt = k + 1
+            if k <= last:
+                done.add(k)
+                if fill is not None:
+                    out["covers"].append(cover(k))
+                # justify unless it's the paragraph's last line and nothing spills past it
+                put(k, line, x, last_in_para=(k == last and not left))
+            else:   # overflow past the paragraph's last line: into the gap below it
+                y = L[last]["baseline"] + (k - last) * pitch
+                put(y, line, x, last_in_para=not left)
+                extra_rows += 1
+            if not left:
+                if nxt <= last and nxt in changed:
+                    k, pending = nxt, new[nxt].split(); continue
+                break
+            # overflow pushes into the next line of the same paragraph (re-typed too)
+            k, pending = nxt, left + (new[nxt].split() if nxt <= last else [])
+    out["retyped"] = len(done) + extra_rows
+    if extra_rows:
+        nxt_base = None
+        for i, l in enumerate(L):
+            if any(i > j for j in done) and para[i] not in {para[j] for j in done}:
+                nxt_base = l["baseline"]; break
+        if nxt_base is not None:
+            lowest = max(ln["y"] for ln in out["lines"])
+            if lowest > nxt_base - pitch * 0.6:
+                out["warn"] = f"{extra_rows} line(s) don't fit the paragraph and overlap the text below; shorten it or tick Shrink."
+    return out
+
+
+def _emit(page, st: _Style, ln, color):
+    """Write one planned line. Justified lines place each word; letter spacing places each glyph."""
+    x0 = ln["x"] - st.lsb(ln["text"])
+    words = ln["text"].split(" ")
+    gap_extra = 0.0
+    if ln.get("just") and len(words) > 1:
+        slack = (ln["just"] - ln["x"]) - st.width(ln["text"])
+        if 0 < slack < 0.3 * (ln["just"] - ln["x"]):          # never stretch a near-empty line
+            gap_extra = slack / (len(words) - 1)
+    tw = pymupdf.TextWriter(page.rect)
+    # positions are laid out in UNSCALED space; the morph applies horizontal scaling about x0
+    cx = x0
+    space = st.font.glyph_advance(32) * st.size + st.sp / st.hs
+    for wi, w in enumerate(words):
+        if st.sp:
+            for ch in w:
+                tw.append((cx, ln["y"]), ch, font=st.font, fontsize=st.size)
+                cx += st.font.glyph_advance(ord(ch)) * st.size + st.sp / st.hs
         else:
-            tw.append((ox, oy), ln, font=font, fontsize=size)
-        morph = (pymupdf.Point(ox, oy), pymupdf.Matrix(hs, 1)) if abs(hs - 1) > 1e-3 else None
-        tw.write_text(page, color=color, morph=morph)
-    return touched | L["bbox"]
+            if w:
+                tw.append((cx, ln["y"]), w, font=st.font, fontsize=st.size)
+            cx += sum(st.font.glyph_advance(ord(ch)) * st.size for ch in w)
+        cx += space + gap_extra / st.hs
+    morph = (pymupdf.Point(x0, ln["y"]), pymupdf.Matrix(st.hs, 1)) if abs(st.hs - 1) > 1e-3 else None
+    tw.write_text(page, color=color, morph=morph)
 
 
-def preview(doc: pymupdf.Document, pno: int, spec, zoom: float):
-    """The new text alone, as a transparent PNG, drawn by the same code as apply. The UI lays it over
-    the page above a flat cover box (the cover is a plain fill, so that composite == the applied result).
-    Returns (clip, png) or (None, None) when there's no text."""
-    parts = [{**spec, **it, "items": None} for it in spec["items"]] if spec.get("items") is not None else [spec]
-    parts = [p for p in parts if (p.get("text") or "").strip()]
-    if not parts:
-        return None, None
+def _text_bbox(P) -> pymupdf.Rect | None:
+    st = P["style"]
+    asc, desc = st.font.ascender * st.size, -st.font.descender * st.size
+    box = None
+    for ln in P["lines"]:
+        x1 = ln["just"] if ln.get("just") else ln["x"] + st.width(ln["text"])
+        b = pymupdf.Rect(ln["x"] - 2, ln["y"] - asc, x1 + 2, ln["y"] + desc)
+        box = b if box is None else box | b
+    return box
+
+
+def draw(page: pymupdf.Page, spec) -> dict:
+    P = plan(spec)
+    for c in P["covers"]:
+        page.draw_rect(c, color=None, fill=spec["fill"], overlay=True, width=0)
+    color = spec.get("color") or [0, 0, 0]
+    for ln in P["lines"]:
+        if ln["text"].strip():
+            _emit(page, P["style"], ln, color)
+    return P
+
+
+def preview(doc: pymupdf.Document, pno: int, spec, zoom: float) -> dict:
+    """Text alone as a transparent PNG (drawn by the same plan as apply) + the cover boxes; the UI
+    shows covers as flat colour under the PNG, which composites to exactly the applied result."""
+    P = plan(spec)
+    res = {"covers": P["covers"], "retyped": P["retyped"], "warn": P["warn"], "clip": None, "png": None,
+           "lines": len(P["lines"])}
+    box = _text_bbox(P)
+    if box is None:
+        return res
     src = doc[pno].rect
     tmp = pymupdf.open()
     pg = tmp.new_page(width=src.width, height=src.height)
-    area = None
-    for p in parts:
-        draw(pg, {**p, "fill": None})
-        bb = layout(p)["bbox"]
-        area = bb if area is None else area | bb
-    area = (area + (-2, -2, 2, 2)) & pg.rect
+    color = spec.get("color") or [0, 0, 0]
+    for ln in P["lines"]:
+        if ln["text"].strip():
+            _emit(pg, P["style"], ln, color)
+    area = (box + (-2, -2, 2, 2)) & pg.rect
     pix = pg.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), clip=area, alpha=True)
-    return [area.x0, area.y0, area.x1, area.y1], pix.tobytes("png")
+    res.update(clip=[area.x0, area.y0, area.x1, area.y1], png=pix.tobytes("png"))
+    return res

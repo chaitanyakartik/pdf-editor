@@ -21,7 +21,7 @@ with sync_playwright() as pw:
     print("prefill line:", repr(lines[i]), "| det before edit:", pg.inner_text("#pDet"))
     lines[i] = "End Date: 1st June 2024"; pg.fill("#pText", "\n".join(lines)); pg.wait_for_timeout(900)
     print("det after edit:", pg.inner_text("#pDet"), "| covers drawn:", pg.evaluate("st.P.covers.length"))
-    cover = pg.evaluate("lineItems(spec())[0].rect"); print("cover box:", [round(v, 1) for v in cover])
+    cover = pg.evaluate("post('/api/preview', {...spec(), zoom:1}).then(r => r.covers[0])"); print("cover box:", [round(v, 1) for v in cover])
     pg.screenshot(path=f"{out}/bigbox_preview.png")
     pg.click("#pApply"); pg.wait_for_selector("#toast.show"); pg.wait_for_timeout(700); print("toast:", pg.inner_text("#toast"))
     b.close()

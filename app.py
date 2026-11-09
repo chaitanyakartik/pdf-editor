@@ -156,7 +156,7 @@ def analyze():
 
 
 def _spec(j) -> dict:
-    keys = ("rect", "fill", "text", "font", "size", "color", "x", "baseline", "pitch", "hscale", "spacing", "align", "fit", "items")
+    keys = ("rect", "fill", "text", "font", "size", "color", "x", "baseline", "pitch", "hscale", "spacing", "align", "fit", "wrap", "orig", "base")
     return {k: j.get(k) for k in keys}
 
 
@@ -167,15 +167,15 @@ def fonts():
 
 @app.post("/api/preview")
 def preview():
-    """Exactly what /api/patch would draw, rendered from a scratch copy of the page."""
+    """Exactly what /api/patch would do: cover boxes + the new text as a transparent PNG."""
     j = request.get_json()
     try:
-        clip, png = compose.preview(_doc(), j["page"], _spec(j), min(float(j.get("zoom", 3)), 6))
+        res = compose.preview(_doc(), j["page"], _spec(j), min(float(j.get("zoom", 3)), 6))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
-    if png is None:
-        return jsonify({"clip": None, "png": None})
-    return jsonify({"clip": clip, "png": "data:image/png;base64," + base64.b64encode(png).decode()})
+    if res["png"]:
+        res["png"] = "data:image/png;base64," + base64.b64encode(res["png"]).decode()
+    return jsonify(res)
 
 
 @app.post("/api/patch")
@@ -183,7 +183,9 @@ def patch():
     j = request.get_json()
     _snapshot()
     try:
-        compose.draw(_doc()[j["page"]], _spec(j))
+        P = compose.draw(_doc()[j["page"]], _spec(j))
+        if not P["retyped"] and not P["covers"]:
+            raise ValueError("nothing changed")
     except ValueError as e:
         S["doc"] = pymupdf.open(stream=S["undo"].pop(), filetype="pdf")
         return jsonify({"error": str(e)}), 400

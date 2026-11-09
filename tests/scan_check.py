@@ -14,5 +14,5 @@ for i, b in enumerate(boxes):
     l0 = a["lines"][0] if a["lines"] else {}
     compose.draw(p, {"rect": b, "fill": a["fill"], "text": a["text"], "size": a["size"] or 11, "color": a["color"],
                      "font": a["font"], "x": l0.get("x"), "baseline": l0.get("baseline"), "pitch": a["pitch"],
-                     "hscale": a.get("hscale", 1.0)})
+                     "hscale": a.get("hscale", 1.0), "orig": a["lines"] if len(a["lines"]) > 1 else None})
     p.get_pixmap(dpi=200, clip=clip).save(f"{outdir}/box{i}_after.png")

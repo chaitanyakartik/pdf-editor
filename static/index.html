@@ -123,7 +123,10 @@ body.insp-open main{padding-right:350px}
 .pv-text{position:absolute;cursor:move;outline:1px dashed rgba(106,168,255,.8);outline-offset:1px}
 .pv-text.dragging{outline-color:var(--blue)}
 .guide{position:absolute;pointer-events:none;border:0 dashed var(--mint);z-index:4}
-.guide.v{width:0;top:0;bottom:0;border-left-width:1.5px} .guide.h{height:0;left:0;right:0;border-top-width:1.5px}
+.guide.v{width:0;top:0;bottom:0;border-left-width:1.5px}
+.wrapline{position:absolute;top:0;bottom:0;width:0;border-left:1.5px dashed var(--blue);opacity:.75;pointer-events:none;z-index:4}
+.wrapline span{position:absolute;top:6px;left:4px;font:600 10px/1 var(--mono);color:#fff;background:var(--blue);padding:3px 5px;border-radius:4px;white-space:nowrap}
+.insp .warn{color:var(--amber);font-size:12px;line-height:1.4} .guide.h{height:0;left:0;right:0;border-top-width:1.5px}
 /* move */
 .mv-hole{position:absolute;pointer-events:none;forced-color-adjust:none}
 .mv-lift{position:absolute;cursor:grab;outline:1.5px dashed var(--amber);outline-offset:2px;z-index:3}
@@ -194,16 +197,18 @@ header{flex-wrap:nowrap;overflow-x:auto}
     <label class="f">Width %<input type="number" id="pWidth" step="1" min="50" max="200" value="100"></label>
     <label class="f">Letter spacing (pt)<input type="number" id="pSpacing" step="0.05" value="0"></label>
     <label class="f">Line spacing (pt)<input type="number" id="pPitch" step="0.1" min="1"></label>
-    <div class="f">Align<div class="al" id="pAlign"><button data-a="left" class="on" title="Left: starts at the Left position">⇤</button><button data-a="center" title="Centre in the box">↔</button><button data-a="right" title="Right edge of the box">⇥</button></div></div>
+    <div class="f">Align<div class="al" id="pAlign"><button data-a="left" class="on" title="Left: starts at the Left position">⇤</button><button data-a="center" title="Centre in the box">↔</button><button data-a="right" title="Right edge of the box">⇥</button><button data-a="justify" title="Justify: flush to the left edge AND the wrap edge (last line of a paragraph stays left)">≡</button></div></div>
   </div>
   <div><div class="gl">Position (pt)</div>
     <div class="grid">
       <label class="f">Left edge<input type="number" id="pX" step="0.1"></label>
       <label class="f">Baseline<input type="number" id="pY" step="0.1"></label>
+      <label class="f"><span><input type="checkbox" id="pWrapOn" checked style="vertical-align:-2px"> Wrap at (right margin)</span><input type="number" id="pWrap" step="0.5"></label>
     </div>
     <div class="hint">Drag the text on the page, or arrow keys (⇧ = 2pt). It snaps to the reference's left edge and lines.</div></div>
   <div><div class="gl">Cover the old text</div>
     <div class="row"><input type="checkbox" id="pCover" checked><input type="color" id="pFill" style="width:60px"> <label class="row" style="margin-left:auto"><input type="checkbox" id="pFit"> Shrink to fit box</label></div></div>
+  <div class="warn" id="pWarn" hidden></div>
   <div class="err" id="pErr" hidden></div>
   <div class="act"><button class="btn" id="pCancel">Cancel</button><button class="btn primary" id="pApply">Apply <kbd>⌘↵</kbd></button></div>
 </aside>
@@ -440,11 +445,14 @@ function openPatch(i, rect, sel){
   P.pv = document.createElement('img'); P.pv.className='pv-text'; P.pv.hidden=true; P.pv.draggable=false; ov.appendChild(P.pv);
   bindTextDrag(P.pv);
   $('#insp').hidden=false; document.body.classList.add('insp-open');
-  $('#pRefRow').hidden = !st.ref; $('#pUseRef').checked = true; $('#pErr').hidden = true;
+  $('#pRefRow').hidden = !st.ref; $('#pUseRef').checked = true; $('#pErr').hidden = true; $('#pWarn').hidden = true;
+  $('#pWrap').value = rect[2].toFixed(1); $('#pWrapOn').checked = true;
   $('#pText').value=''; $('#pText').disabled=true; $('#pDet').textContent='reading the text under the box…';
-  $('#pSize').value = Math.max(6, Math.min(48, Math.round((rect[3]-rect[1])*0.72))); $('#pColor').value='#111111';
+  // empty area: the reference's style, else the last patch's, else 11pt (box height says nothing about font size)
+  const LS = st.lastStyle || {size:11, font:'helv', color:[0.07,0.07,0.07]};
+  $('#pSize').value = LS.size; $('#pColor').value=hex(LS.color);
   $('#pWidth').value=100; $('#pSpacing').value=0; $('#pPitch').value=''; $('#pFit').checked=false; $('#pCover').checked=true; $('#pFill').value='#ffffff';
-  setAlign('left'); setFontUI('helv');
+  setAlign('left'); setFontUI(LS.font);
   $('#pX').value=(rect[0]+1).toFixed(2); $('#pY').value=((rect[1]+rect[3])/2+0.35*num('#pSize')).toFixed(2);
   post('/api/analyze', {page:i, rect}).then(a => {
     if(st.P!==P) return;
@@ -463,7 +471,7 @@ function decide(){
   P.lines = a.lines || [];
   if(P.lines.length) P.base = {x: Math.min(...P.lines.map(l=>l.x)), y: P.lines[0].baseline};
   const S = R ? R.a : (a.size ? a : null);
-  if(!S){ $('#pDet').textContent='empty area'; return; }
+  if(!S){ $('#pDet').textContent='empty area'; $('#pWrap').value=rect[2].toFixed(1); return; }
   $('#pSize').value=S.size; setFontUI(S.font); $('#pColor').value=hex(S.color);
   $('#pWidth').value=Math.round((S.hscale||1)*100);
   const pitch = S.pitch || a.pitch || null; $('#pPitch').value = pitch ? pitch.toFixed(2) : '';
@@ -475,7 +483,14 @@ function decide(){
   }
   const x = R ? R.left : (a.lines.length ? Math.min(...a.lines.map(l=>l.x)) : rect[0]+1);
   if(!P.lines.length) P.base = {x, y};
-  $('#pX').value=x.toFixed(2); $('#pY').value=y.toFixed(2); setAlign('left');
+  $('#pX').value=x.toFixed(2); $('#pY').value=y.toFixed(2);
+  // wrap edge = the right margin of the paragraph(s) in the box, else the reference's, else the box edge;
+  // justified if 2+ lines run flush to that margin
+  const margin = ls => { if(!ls || ls.length<2) return null; const m=Math.max(...ls.map(l=>l.box[2]));
+    return {right:m, justified: ls.filter(l=>l.box[2] >= m-2).length >= 2}; };
+  const M = margin(P.lines) || (R && margin(R.a.lines)) || {right:rect[2], justified:false};
+  $('#pWrap').value = M.right.toFixed(1); $('#pWrapOn').checked = true;
+  setAlign(M.justified ? 'justify' : 'left');
   $('#pDet').textContent = (R?'REF · ':'') + `${fontLabel(S.font)} ${S.size}pt` + (R ? '' : (S.match!=null?` · ${Math.round(S.match*100)}% shape match`:''));
 }
 function setFontUI(id){
@@ -499,52 +514,31 @@ function spec(){
   const P=st.P;
   return {page:P.i, rect:P.rect, text:$('#pText').value, font:curFont(), size:num('#pSize')||11, color:unhex($('#pColor').value),
     hscale:(num('#pWidth')||100)/100, spacing:num('#pSpacing')||0, pitch:num('#pPitch'), align:P.align,
-    x:num('#pX'), baseline:num('#pY'), fit:$('#pFit').checked, fill:$('#pCover').checked ? unhex($('#pFill').value) : null};
+    x:num('#pX'), baseline:num('#pY'), fit:$('#pFit').checked, fill:$('#pCover').checked ? unhex($('#pFill').value) : null,
+    wrap: $('#pWrapOn').checked ? num('#pWrap') : null,
+    orig: P.lines.length>1 ? P.lines : null, base: P.lines.length>1 ? [P.base.x, P.base.y] : null};
 }
-/* Box with 2+ lines of text: diff the edited text against what OCR read and re-type ONLY the changed
-   lines, each covered by its own ink box and kept at its own left edge + baseline (indents, bullets,
-   paragraph gaps survive). Unchanged lines stay original pixels. Left/Baseline edits and drags shift
-   the changed lines only. Returns null for single-line / empty boxes (one cover = the box). */
-function lineItems(sp){
-  const P=st.P, L=P.lines; if(!L || L.length<2) return null;
-  const nw=sp.text.split('\n'), old=L.map(l=>l.text.trim());
-  const offX=(sp.x ?? P.base.x)-P.base.x, offY=(sp.baseline ?? P.base.y)-P.base.y;
-  const pitch=sp.pitch || P.tgt.pitch || sp.size*1.2;
-  const cov = i => { const b=L[i].box;
-    const up = i>0 ? (b[1]-L[i-1].box[3])/2 : 2, dn = i<L.length-1 ? (L[i+1].box[1]-b[3])/2 : 2;
-    return [b[0]-1, b[1]-Math.max(0.3,Math.min(6,up)), b[2]+1, b[3]+Math.max(0.3,Math.min(6,dn))]; };   // half the gap to the next line: catches handwriting tails
-  const items=[];
-  if(nw.length===old.length){
-    nw.forEach((t,i)=>{ if(t.trim()!==old[i]) items.push({rect:cov(i), text:t, x:L[i].x+offX, baseline:L[i].baseline+offY, fill:sp.fill}); });
-    items.changed = items.length;
-  } else {   // lines added/removed: re-flow from the first difference to the end
-    let f=0; while(f<old.length && f<nw.length && nw[f].trim()===old[f]) f++;
-    const covers=[]; for(let i=f;i<old.length;i++) covers.push(cov(i));
-    covers.forEach(c=>items.push({rect:c, text:'', fill:sp.fill}));
-    const a = f<L.length ? L[f] : L[L.length-1], y0 = f<L.length ? a.baseline : a.baseline+pitch;
-    const txt = nw.slice(f).join('\n');
-    const area = covers.length ? covers.reduce((u,c)=>[Math.min(u[0],c[0]),Math.min(u[1],c[1]),Math.max(u[2],c[2]),Math.max(u[3],c[3])]) : [a.box[0], y0-sp.size, P.rect[2], y0+4];
-    if(txt.trim()) items.push({rect:area, text:txt, x:a.x+offX, baseline:y0+offY, pitch, fill:null});
-    items.changed = Math.max(old.length-f, nw.length-f);
-  }
-  return items;
-}
+/* Multi-line boxes: the server plans it (compose.plan): only changed lines are covered + re-typed, a
+   line that gets too long wraps at the wrap edge and pushes words down through its paragraph, justified
+   if the paragraph is. Preview and Apply use that same plan. */
 let pvT;
 function preview(){ clearTimeout(pvT); pvT=setTimeout(doPreview, 80); }
 async function doPreview(){
   const P=st.P; if(!P) return;
-  const sp=spec(), seq=++P.seq, items=lineItems(sp);
-  if(items) sp.items=items;
-  // covers: one per changed line (multi-line box) or the whole box
-  P.covers.forEach(c=>c.remove());
-  const ov=st.pages[P.i].el.querySelector('.ov');
-  P.covers = (items ? items.filter(it=>it.fill).map(it=>it.rect) : (sp.fill ? [P.rect] : [])).map(r=>colorBox('pv-cover', r, sp.fill));
-  P.covers.forEach(c=>ov.insertBefore(c, P.pv));
-  if(items) $('#pDet').textContent = `${P.lines.length} lines · ${items.changed || 'none'} changed` + (items.changed ? ', only those are re-typed' : '');
+  const sp=spec(), seq=++P.seq, ov=st.pages[P.i].el.querySelector('.ov'), k=st.scale;
+  // the wrap edge, drawn on the page
+  if(!P.wrapEl){ P.wrapEl=div('wrapline'); P.wrapEl.innerHTML='<span>WRAP</span>'; ov.appendChild(P.wrapEl); }
+  P.wrapEl.hidden = sp.wrap==null; if(sp.wrap!=null) P.wrapEl.style.left = sp.wrap*k+'px';
   try{
     const r = await post('/api/preview', {...sp, zoom:Math.min(6, st.scale*(window.devicePixelRatio||1))});
     if(st.P!==P || seq!==P.seq) return;
     $('#pErr').hidden=true;
+    P.covers.forEach(c=>c.remove());
+    P.covers = (sp.fill ? r.covers : []).map(c=>colorBox('pv-cover', c, sp.fill));
+    P.covers.forEach(c=>ov.insertBefore(c, P.pv));
+    P.retyped = r.retyped;
+    if(P.lines.length>1) $('#pDet').textContent = `${P.lines.length} lines · ` + (r.retyped ? `${r.retyped} re-typed, rest untouched` : 'nothing changed yet');
+    $('#pWarn').textContent = r.warn || ''; $('#pWarn').hidden = !r.warn;
     if(!r.png){ P.pv.hidden=true; return; }
     P.pv.src=r.png; place(P.pv, r.clip); P.pv.hidden=false; P.clip=r.clip;
   }catch(e){ if(st.P===P && seq===P.seq){ $('#pErr').textContent=e.message; $('#pErr').hidden=false; } }
@@ -560,7 +554,7 @@ function bindTextDrag(img){
     };
     const up = () => {
       img.removeEventListener('pointermove', mv); img.removeEventListener('pointerup', up); img.classList.remove('dragging');
-      if(Math.abs(res.x-s0.X)>0.05) setAlign('left');
+      if(Math.abs(res.x-s0.X)>0.05 && (P.align==='center'||P.align==='right')) setAlign('left');
       $('#pX').value=res.x.toFixed(2); $('#pY').value=res.y.toFixed(2);
       setTimeout(()=>{ img.style.transform=''; guides(null); }, 120); preview();
     };
@@ -569,8 +563,9 @@ function bindTextDrag(img){
 }
 async function applyPatch(){
   const P=st.P; if(!P) return;
-  const sp=spec(), pg=P.i, items=lineItems(sp);
-  if(items){ if(!items.length){ toast('Nothing changed: edit a line first.','warn'); return; } sp.items=items; }
+  const sp=spec(), pg=P.i;
+  st.lastStyle = {size:sp.size, font:sp.font, color:sp.color};
+  if(P.lines.length>1 && !P.retyped){ toast('Nothing changed: edit a line first.','warn'); return; }
   $('#pApply').disabled=true;
   try{
     setMeta(await post('/api/patch', sp)); st.edits++; updCount();
@@ -580,12 +575,12 @@ async function applyPatch(){
 }
 function closePatch(){
   const P=st.P; if(!P) return;
-  P.sel.remove(); P.covers.forEach(c=>c.remove()); P.pv.remove(); guides(null);
+  P.sel.remove(); P.covers.forEach(c=>c.remove()); P.pv.remove(); P.wrapEl?.remove(); guides(null);
   st.P=null; $('#insp').hidden=true; document.body.classList.remove('insp-open');
 }
 // every control re-renders the preview
-['#pText','#pSize','#pColor','#pWidth','#pSpacing','#pPitch','#pX','#pY','#pFill'].forEach(id=>$(id).addEventListener('input', preview));
-['#pCover','#pFit'].forEach(id=>$(id).addEventListener('change', preview));
+['#pText','#pSize','#pColor','#pWidth','#pSpacing','#pPitch','#pX','#pY','#pFill','#pWrap'].forEach(id=>$(id).addEventListener('input', preview));
+['#pCover','#pFit','#pWrapOn'].forEach(id=>$(id).addEventListener('change', preview));
 $('#pFam').addEventListener('change', ()=>{ updTog(); preview(); });
 $('#pB').onclick = () => { st.P.bold=!st.P.bold; updTog(); preview(); };
 $('#pI').onclick = () => { st.P.italic=!st.P.italic; updTog(); preview(); };
@@ -674,7 +669,7 @@ document.addEventListener('keydown', e => {
   if(arrow && (st.mv || st.P)){            // nudge: 0.25pt, shift = 2pt
     e.preventDefault(); const s=e.shiftKey?2:0.25;
     if(st.mv) moveTo(st.mv.dx+arrow[0]*s, st.mv.dy+arrow[1]*s, false);
-    else { $('#pX').value=(num('#pX')+arrow[0]*s).toFixed(2); $('#pY').value=(num('#pY')+arrow[1]*s).toFixed(2); if(arrow[0]) setAlign('left'); preview(); }
+    else { $('#pX').value=(num('#pX')+arrow[0]*s).toFixed(2); $('#pY').value=(num('#pY')+arrow[1]*s).toFixed(2); if(arrow[0] && (st.P.align==='center'||st.P.align==='right')) setAlign('left'); preview(); }
     return;
   }
   if(e.key==='Enter' && st.mv){ e.preventDefault(); applyMove(); return; }

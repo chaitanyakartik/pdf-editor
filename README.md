@@ -41,6 +41,14 @@ that: a changed line is covered by its own box (to half the gap to its neighbour
 unchanged lines stay original pixels, so indents, bullets and paragraph gaps survive. `tests/ui_bigbox.py`: box over
 the whole letter body, edit one line → 0 changed pixels outside that line.
 
+**Wrapping.** Text wraps at a fixed right margin (*Wrap at*, shown as a dashed WRAP line). Default: the right
+margin of the paragraph(s) in the box, else the reference paragraph's, else the box edge. In a multi-line box an
+edited line that gets too long pushes its overflow words into the next line of the same paragraph, which re-wraps,
+until it settles; lines the reflow doesn't reach stay pixels. Paragraphs = blank-line gap, indent, or short line.
+**Justify** (≡) is auto-detected when 2+ lines run flush to the margin; a paragraph's last line stays left.
+`compose.plan()` decides covers + lines for both preview and apply. `tests/ui_wrap.py`: lengthen one justified line →
+4 lines re-typed, 0 changed pixels outside that paragraph. Lines the box edge slices through are left as pixels.
+
 **Dark Reader**: the page carries `<meta name="darkreader-lock">` and covers are canvas pixels; Dark Reader
 recoloured the CSS-white cover box black (2026-11-09).
 

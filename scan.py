@@ -215,6 +215,10 @@ def analyze(page: pymupdf.Page, rect) -> dict:
         sub = mask[a:b_ + 1, c0:c1]
         if sub.sum() < 5:
             continue
+        # a line the box edge slices through can't be read or re-typed reliably: leave it as pixels
+        ys_ = np.where(sub.any(axis=1))[0]
+        if len(ocr) > 1 and (a + ys_.min() <= 1 or a + ys_.max() >= H - 2):
+            continue
         m = _line_metrics(mask[:, c0:c1], a, b_)
         ys, xs = np.where(sub)
         box = [r.x0 + (c0 + xs.min()) / Z, r.y0 + (a + ys.min()) / Z, r.x0 + (c0 + xs.max() + 1) / Z, r.y0 + (a + ys.max() + 1) / Z]
