@@ -1,83 +1,150 @@
-# Redline: edit the text in a PDF, nothing else
+<div align="center">
 
-Local tool. Click any text in a PDF, retype it, and download. Headers, footers, stamps, logos,
-backgrounds and every other line on the page stay where they were.
+# 🟥 Redline
+
+### Edit the text in a PDF. Nothing else.
+
+Click any line, retype it, download. Headers, footers, stamps, logos, backgrounds and every other line on the page stay exactly where they were, **including on scanned pages.**
+
+![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)
+![PyMuPDF](https://img.shields.io/badge/engine-PyMuPDF-E8412C)
+![Tesseract](https://img.shields.io/badge/OCR-Tesseract-5A5A5A)
+![PDFs stay local](https://img.shields.io/badge/PDFs-stay%20local-2EA44F)
+
+<img src="docs/hero.png" alt="Redline editing an invoice PDF" width="820">
+
+</div>
+
+---
+
+## Why this exists
+
+Editing text in a PDF is finicky. A PDF is not a document with paragraphs. It is a set of drawing instructions: glyph IDs placed at absolute coordinates in a subset-embedded font that often lacks the letters you want to type. Most editors respond by re-flowing the page, substituting the font, nudging neighbouring lines, or flattening the whole page into an image.
+
+**Scanned pages are worse.** There is no text at all, only pixels. Changing one word normally means hiding it under a white box and typing over it in a font that is visibly the wrong size, weight and position.
+
+Redline was built for both cases. On text PDFs it changes only the glyphs you touch. On scans it reads the page, measures the typeface, baseline, ink colour and paper colour, and re-types the line so that it sits where the original did.
+
+<table>
+<tr>
+<td align="center"><b>Before</b></td>
+<td align="center"><b>After</b></td>
+</tr>
+<tr>
+<td><img src="docs/edit-before.png" alt="Selecting a text run" width="400"></td>
+<td><img src="docs/edit-after.png" alt="Same run retyped in the original font" width="400"></td>
+</tr>
+<tr>
+<td colspan="2" align="center"><sub>Same font, same baseline, same colour. Nothing else on the page moved.</sub></td>
+</tr>
+</table>
+
+---
+
+## ✨ Features
+
+| | Mode | What it does |
+|---|---|---|
+| ✏️ | **Edit text** (`E`) | Click a text run, type, press Enter. Keeps the baseline, size and colour. Uses the PDF's own embedded font when it contains every glyph you typed; otherwise a same-named installed font, then a look-alike standard font (with a warning), then any installed font that covers the script (Kannada, Devanagari and others). **Fit width** shrinks text that is longer than the original. |
+| 🩹 | **Patch** (`P`) | For scans and text baked into images. Drag a box over the words: Redline OCRs them and **prefills the text** so you only edit it, picks the closest font by pixel overlap, sizes it from the line's ink width, and detects baseline, left edge, text colour and paper colour. |
+| 📐 | **Reference box** (`R`) | Drag over existing text first. Every later patch copies its left edge (ink to ink, corrected for side bearing), font, size, colour and line spacing, and snaps to its line grid. |
+| ↔️ | **Move** (`M`) | Box some text and drag it, or use the arrow keys. On scans the original pixels move; on text PDFs the text spans themselves move and stay selectable. |
+| ↩️ | **Undo / redo** | ⌘Z / ⌘⇧Z, 50 steps. Sessions persist across restarts. |
+
+### The Patch panel
+
+Dragging a Patch box opens a panel with full formatting: font family (Sans, Serif, Mono, or any installed `.ttf`/`.otf`), bold, italic, size, colour, width %, letter spacing, line spacing, alignment, exact left/baseline in points, cover colour and shrink-to-fit.
+
+Each change re-renders a **live preview** drawn by the same code path as Apply (checked pixel-identical). Drag the preview or nudge it with the arrow keys (0.25 pt, or 2 pt with Shift); it snaps to the reference edge and line grid. ⌘↵ applies.
+
+- **Only changed lines are re-typed.** OCR keeps each line's text, ink box, left edge and baseline. Your edit is diffed against that, and unchanged lines remain original pixels, so indents, bullets and paragraph gaps survive.
+- **Paragraph reflow.** Text wraps at a fixed right margin taken from the paragraph. A line that becomes too long pushes its overflow into the next line, which re-wraps until the paragraph settles.
+- **Justification** is detected automatically when two or more lines run flush to the margin.
+
+---
+
+## 🚀 Quick start
 
 ```sh
-./run.sh            # -> http://localhost:43063  (port from ops/tools/port.py personal pdf-editor)
-./run.sh file.pdf   # opens with that file loaded
+git clone https://github.com/chaitanyakartik/pdf-editor.git
+cd pdf-editor
+brew install tesseract   # optional: enables OCR prefill in Patch mode
+
+./run.sh                 # opens http://localhost:43063
+./run.sh file.pdf        # opens with a file loaded
 ```
 
-## Modes
-- **Edit text**: click a text run → type → Enter. Same baseline, size and colour. Font order: the PDF's own
-  embedded font (if it has every glyph you typed and its metrics check out) → same-named installed font →
-  look-alike standard font (toast warns) → any installed font covering the script (Kannada, Devanagari…).
-  **Fit width** shrinks new text that's longer than the original.
-- **Patch**: for scans or text baked into an image. Drag a box over the words. `scan.py` then:
-  reads the existing words (Tesseract) and **prefills them** so you just edit; picks the font by rendering those
-  words in 8 standard fonts and keeping the best pixel overlap; sets the size from the line's ink width; detects
-  baseline, left edge, text colour and paper colour, so the new text lands exactly on the old one. If no
-  standard font fits (a narrow typeface), it picks Sans or Sans Bold by stroke thickness, matches glyph height,
-  and squeezes the width (PDF horizontal scaling). Untick *Cover* to just add text.
-- **Reference box** (Patch mode: *Set reference*, `R`, or Shift-drag): drag over existing text first. Every patch after
-  that copies its **left edge** (ink-to-ink, corrected for the first letter's side bearing), font, size, colour and line
-  spacing. If the target box is empty and the reference has 2+ lines, the new line snaps onto the reference's line grid.
-  The reference stays (green REF box + dashed left-edge guide) until you clear it. `tests/ui_ref.py` covers both cases.
-  Checked on a scanned certificate (`tests/scan_check.py`, `tests/ui_patch_scan.py`): title, date, 4-line address and
-  a bullet line re-patch near-identically (Sans, 58–64% overlap); a narrow-typeface footer gets the right width and
-  height, but the letter shapes differ.
-- ⌘Z / ⌘⇧Z undo/redo (50 steps). `E` / `P` switch modes.
+`run.sh` creates a virtualenv and installs `pymupdf`, `flask` and `numpy` on first run. Set `PORT` to use a different port.
 
-## Patch panel (formatting + live preview)
-Dragging a Patch box opens a panel on the right: text, font family (Sans/Serif/Mono + every .ttf/.otf installed
-on the Mac), Bold/Italic, size, colour, width %, letter spacing, line spacing, align, exact Left/Baseline (pt), cover
-colour, shrink-to-fit. Every change re-renders a **preview** over the page: a flat cover box plus the new text as a
-transparent PNG drawn by the same `compose.draw` code as Apply (checked pixel-identical). Drag the previewed text or use
-arrow keys (0.25pt, Shift = 2pt) to position it; it snaps to the reference's left edge and line grid. ⌘↵ applies.
+### Keyboard
 
-**Multi-line boxes re-type only what you change.** OCR keeps each line's text, ink box, left edge and baseline
-(bullets OCR misreads as "e" are left as pixels; "|" mid-line is read as "I"). The panel diffs your edit against
-that: a changed line is covered by its own box (to half the gap to its neighbours) and re-typed at its own position;
-unchanged lines stay original pixels, so indents, bullets and paragraph gaps survive. `tests/ui_bigbox.py`: box over
-the whole letter body, edit one line → 0 changed pixels outside that line.
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `E` | Edit text mode | `R` / Shift-drag | Set reference box |
+| `P` | Patch mode | `↑ ↓ ← →` | Nudge (Shift = 2 pt) |
+| `M` | Move mode | `⌘↵` | Apply patch |
+| `⌘Z` / `⌘⇧Z` | Undo / redo | `Esc` | Cancel |
 
-**Wrapping.** Text wraps at a fixed right margin (*Wrap at*, shown as a dashed WRAP line). Default: the right
-margin of the paragraph(s) in the box, else the reference paragraph's, else the box edge. In a multi-line box an
-edited line that gets too long pushes its overflow words into the next line of the same paragraph, which re-wraps,
-until it settles; lines the reflow doesn't reach stay pixels. Paragraphs = blank-line gap, indent, or short line.
-**Justify** (≡) is auto-detected when 2+ lines run flush to the margin; a paragraph's last line stays left.
-`compose.plan()` decides covers + lines for both preview and apply. `tests/ui_wrap.py`: lengthen one justified line →
-4 lines re-typed, 0 changed pixels outside that paragraph. Lines the box edge slices through are left as pixels.
+---
 
-**Dark Reader**: the page carries `<meta name="darkreader-lock">` and covers are canvas pixels; Dark Reader
-recoloured the CSS-white cover box black (2026-11-09).
+## 🔬 How it works
 
-**Sessions** persist to `~/Library/Application Support/Redline/session.pkl` (doc + 20 undo steps) on every change;
-`python app.py` with no file restores it. Test servers: `REDLINE_NO_SESSION=1 PORT=43070 python app.py <pdf>`.
+```
+Text PDF                                    Scanned page
+────────                                    ────────────
+click a span                                drag a box
+   │                                           │
+   ▼                                           ▼
+redact a thin band inside the span          Tesseract → words + per-line geometry
+(images = NONE, graphics = NONE)               │
+   │                                           ▼
+   ▼                                        render the words in 8 standard fonts,
+write the new string at the same origin     keep the best pixel overlap; measure
+with TextWriter, in the best-matching font  size, baseline, ink and paper colour
+   │                                           │
+   ▼                                           ▼
+re-extract the page and report any          compose.plan(): diff lines, reflow,
+other text that changed                     cover only the changed lines, re-type
+```
 
-## Move (`M`)
-Box some text → it's lifted (ink as a transparent PNG, its old spot shown cleared) → drag it or use arrow keys,
-snapping to the reference → Enter. On scans (an image under the box) the scanned pixels move, so it looks identical;
-on real-text PDFs the text spans themselves move (same font, still selectable).
+| File | Role |
+|---|---|
+| `engine.py` | Text-PDF edits: glyph-level redaction, font resolution, write-back, collateral check |
+| `scan.py` | OCR, font matching by pixel overlap, baseline / colour / side-bearing measurement |
+| `compose.py` | Patch layout: line diffing, paragraph reflow, justification, rendering for preview and apply |
+| `app.py` | Local Flask server, document state, undo/redo, session persistence |
+| `static/index.html` | The editor UI |
 
-## How it works (engine.py)
-Removes only the touched glyphs with a PyMuPDF redaction whose rect is a thin band inside the span
-(`images=NONE, graphics=NONE`), so images and vector art are untouched, then writes the new string at the same
-origin with `TextWriter`. After each edit it re-extracts the page and reports any *other* text that changed.
+---
 
-## Tests
-- `tests/pixel_diff.py <pdfs…>`: edits 6 spans per PDF and counts changed pixels outside the edited boxes.
-  2026-11-09 over 21 real PDFs: 0 collateral text, 0 stray pixels on 20/21. The one exception: MuPDF rewrites the
-  content stream on redaction (absolute `Tm` → relative `TD`, e.g. `99.99996`), shifting one unrelated line by ~0.1pt.
-  That's sub-pixel and not visible.
-- `tests/ui_inspector.py <outdir> [url]`: reference + patch panel (formatting, preview, drag-snap) + Move, on a throwaway
-  server (`PORT=43070 python app.py <scan>`), never on the live one.
-- `tests/ui_e2e.py <outdir>`: drives the UI in headless Chromium (edit, patch, undo) with the server running on `tests/fixture.pdf`.
-- `tests/make_fixture.py`: builds the fixture (header bar, highlight box, image, stamp, mixed bold/regular, rotated text).
+## 🧪 Tests
 
-## Limits
-- Rotated/vertical text: not click-editable (use Patch).
-- Scanned pages have no text layer, so Patch is the only option there. Patch fonts are the standard 14
-  (Sans/Serif/Mono families), so a distinctive scanned typeface gets the right size and position, but the letter shapes won't match.
-- Patch needs `tesseract` on PATH to prefill words (`brew install tesseract`); without it, size, font weight and colours are still detected.
-- One text run = one style. A run that mixes bold and regular is split by the PDF into separate runs; edit each.
+| Test | What it checks |
+|---|---|
+| `tests/pixel_diff.py <pdfs…>` | Edits six spans per PDF and counts changed pixels **outside** the edited boxes. On 21 real PDFs: zero collateral text changes and zero stray pixels on 20 of 21. The exception is a ~0.1 pt sub-pixel shift caused by MuPDF rewriting the content stream. |
+| `tests/ui_bigbox.py` | Box the whole body of a scanned letter, edit one line: 0 changed pixels outside that line. |
+| `tests/ui_wrap.py` | Lengthen one justified line: 4 lines re-typed, 0 changed pixels outside that paragraph. |
+| `tests/ui_ref.py` | Reference box: left-edge copy and line-grid snapping. |
+| `tests/scan_check.py`, `tests/ui_patch_scan.py` | Re-patching a scanned certificate (title, date, address, bullets). |
+| `tests/make_fixture.py` | Builds `tests/fixture.pdf`: header bar, highlight box, image, stamp, mixed bold/regular, rotated text. |
+
+UI tests drive headless Chromium through Playwright (`pip install playwright && playwright install chromium`). Run them against a throwaway server:
+
+```sh
+REDLINE_NO_SESSION=1 PORT=43070 .venv/bin/python app.py tests/fixture.pdf
+```
+
+---
+
+## ⚠️ Limits
+
+- **Rotated or vertical text** cannot be click-edited. Use Patch.
+- **Scanned typefaces.** Patch uses the standard Sans, Serif and Mono families (or an installed font you choose). A distinctive scanned typeface gets the right size, weight and position, but the letter shapes will differ.
+- **One run, one style.** A line that mixes bold and regular is stored as separate runs; edit each one.
+- **OCR prefill needs `tesseract`** on `PATH`. Without it, size, weight and colours are still detected.
+
+---
+
+<div align="center">
+<sub>Runs entirely on your machine. Your PDFs never leave it.</sub>
+</div>
